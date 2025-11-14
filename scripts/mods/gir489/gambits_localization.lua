@@ -64,59 +64,71 @@ local loc = {
     priority_targets = {
         en = "Priority Targets"
     },
+	target_bosses = {
+        en = "Target Bosses"
+    },
+    target_bosses_description = {
+        en = "Automatically aim at Champions/Beast of Nurgle/Chaos Spawn/Plague Ogryn/Rinda and Rodin/Captains."
+    },
+	target_berzerkers = {
+        en = "Target Ragers"
+    },
+    target_berzerkers_description = {
+        en = "Automatically aim at Ragers"
+    },
     target_hounds = {
         en = "Target Pox Hounds"
     },
     target_hounds_description = {
-        en = "Automatically aim at Pox Hounds (chaos_hound)"
+        en = "Automatically aim at Pox Hounds"
     },
     target_netgunners = {
         en = "Target Trappers"
     },
     target_netgunners_description = {
-        en = "Automatically aim at Trappers with net guns (renegade_netgunner)"
+        en = "Automatically aim at Trappers"
     },
     target_flamers = {
         en = "Target Flamers"
     },
     target_flamers_description = {
-        en = "Automatically aim at Flamer enemies (cultist_flamer, renegade_flamer)"
+        en = "Automatically aim at Flamers."
     },
     target_snipers = {
         en = "Target Snipers"
     },
     target_snipers_description = {
-        en = "Automatically aim at Sniper enemies (renegade_sniper)"
+        en = "Automatically aim at Snipers."
     },
     target_bombers = {
         en = "Target Bombers"
     },
     target_bombers_description = {
-        en = "Automatically aim at Bombers and Grenadiers (poxwalker_bomber, grenadiers)"
+        en = "Automatically aim at Bombers and Grenadiers."
     },
     target_gunners = {
         en = "Target Gunners"
     },
     target_gunners_description = {
-        en = "Automatically aim at Gunner enemies (cultist_gunner, renegade_gunner, plasma_gunner)"
+        en = "Automatically aim at Elite Gunner enemies."
     },
     target_mutants = {
         en = "Target Mutants"
     },
     target_mutants_description = {
-        en = "Automatically aim at Mutants and Shocktroops (cultist_mutant, shocktrooper)"
+        en = "Automatically aim at Mutants."
     },
 	target_ogryns_melee = {
-        en = "Target Ogryns (Melee)"
+        en = "Target Ogryns"
     },
     target_ogryns_melee_description = {
-        en = "Automatically aim at Ogryn elites (bulwark, executor)"
+        en = "Automatically aim at Ogryns. (Bulwark/Crusher)"
     },
     target_ogryns = {
-        en = "Target Ogryns (Gunners)"
+        en = "Target Reapers"
     },
     target_ogryns_description = {
-        en = "Automatically aim at Ogryn gunners."
+        en = "Automatically aim at Ogryn Reapers."
     }
 }
 

@@ -47,13 +47,13 @@ return {
                             360
                         }
                     },
-					{
-						setting_id = "use_mouse2_fallback",
-						type = "checkbox",
-						default_value = true
-					},
                     {
-						setting_id = "use_custom_aim_key",
+                        setting_id = "use_mouse2_fallback",
+                        type = "checkbox",
+                        default_value = true
+                    },
+                    {
+                        setting_id = "use_custom_aim_key",
                         type = "keybind",
                         default_value = {},
                         keybind_global = true,
@@ -67,6 +67,18 @@ return {
                 setting_id = "priority_targets",
                 type = "group",
                 sub_widgets = {
+                    {
+                        setting_id = "target_bosses",
+                        type = "dropdown",
+                        options = priority_options,
+                        default_value = 0
+                    },
+                    {
+                        setting_id = "target_berzerkers",
+                        type = "dropdown",
+                        options = priority_options,
+                        default_value = 0
+                    },
                     {
                         setting_id = "target_hounds",
                         type = "dropdown",
@@ -115,7 +127,7 @@ return {
                         options = priority_options,
                         default_value = 0
                     },
-					{
+                    {
                         setting_id = "target_ogryns",
                         type = "dropdown",
                         options = priority_options,

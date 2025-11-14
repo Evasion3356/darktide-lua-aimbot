@@ -7,30 +7,42 @@ local HALF_PI = math.pi / 2
 local function get_breed_priority(breed_name)
     local breed_mapping = {
         -- Hounds
-        chaos_hound = mod:get("target_hounds"),
+        chaos_hound = mod:get("target_hounds"), --Pox Hound
+        -- Boss Enemies
+        chaos_beast_of_nurgle = mod:get("target_bosses"), --Beast of Nurgle
+        chaos_plague_ogryn = mod:get("target_bosses"), --Plague Ogyrn
+        chaos_spawn = mod:get("target_bosses"), --Chaos Spawn
+        cultist_captain = mod:get("target_bosses"), --Admontion Champion
+        renegade_captain = mod:get("target_bosses"), --Scab Captain
+        renegade_twin_captain = mod:get("target_bosses"), --Rodin Karnak
+        renegade_twin_captain_two = mod:get("target_bosses"), --Rinda Karnak
         -- Trappers
-        renegade_netgunner = mod:get("target_netgunners"),
+        renegade_netgunner = mod:get("target_netgunners"), --Trapper
         -- Flamers
-        cultist_flamer = mod:get("target_flamers"),
-        renegade_flamer = mod:get("target_flamers"),
+        cultist_flamer = mod:get("target_flamers"), --Dreg Tox Flamer
+        renegade_flamer = mod:get("target_flamers"), --Scab Flamer
         -- Snipers
-        renegade_sniper = mod:get("target_snipers"),
+        renegade_sniper = mod:get("target_snipers"), --Sniper
         -- Bombers
-        cultist_bomber = mod:get("target_bombers"),
-        renegade_grenadier = mod:get("target_bombers"),
-        renegade_grenadier_elite = mod:get("target_bombers"),
+        chaos_poxwalker_bomber = mod:get("target_bombers"), --Poxburster
+        cultist_grenadier = mod:get("target_bombers"), --Dreg Tox Bomber
+        renegade_grenadier = mod:get("target_bombers"), --Scab Bomber
         -- Gunners
-        cultist_gunner = mod:get("target_gunners"),
-        renegade_gunner = mod:get("target_gunners"),
-        renegade_plasma_gunner = mod:get("target_gunners"),
+        cultist_shocktrooper = mod:get("target_gunners"), --Dreg Shotgunner
+        cultist_gunner = mod:get("target_gunners"), --Dreg Gunner
+        renegade_gunner = mod:get("target_gunners"), --Scab Gunner
+        renegade_plasma_gunner = mod:get("target_gunners"), --Scab Plasmer Gunner
+        renegade_shocktrooper = mod:get("target_gunners"), --Scab Shotgunner
+        -- Ragers
+        cultist_berzerker = mod:get("target_berzerkers"), --Dreg Rager
+        renegade_berzerker = mod:get("target_berzerkers"), --Scab Rager
         -- Mutants
-        cultist_mutant = mod:get("target_mutants"),
-        renegade_shocktrooper = mod:get("target_mutants"),
-        renegade_shocktrooper_executioner = mod:get("target_mutants"),
+        cultist_mutant = mod:get("target_mutants"), --Mutant
+        cultist_mutant_mutator = mod:get("target_mutants"), --Mutant
         -- Ogryns
-        ogryn_bulwark = mod:get("target_ogryns_melee"),
-        ogryn_executor = mod:get("target_ogryns_melee"),
-        ogryn_gunner = mod:get("target_ogryns")
+        chaos_ogryn_bulwark = mod:get("target_ogryns_melee"), --Bulwark
+        chaos_ogryn_executor = mod:get("target_ogryns_melee"), --Crusher
+        chaos_ogryn_gunner = mod:get("target_ogryns") --Reaper
     }
     
     return breed_mapping[breed_name] or 0
