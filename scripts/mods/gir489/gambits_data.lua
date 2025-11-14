@@ -110,6 +110,12 @@ return {
                         default_value = 4
                     },
                     {
+                        setting_id = "target_ogryns_melee",
+                        type = "dropdown",
+                        options = priority_options,
+                        default_value = 0
+                    },
+					{
                         setting_id = "target_ogryns",
                         type = "dropdown",
                         options = priority_options,

@@ -106,11 +106,17 @@ local loc = {
     target_mutants_description = {
         en = "Automatically aim at Mutants and Shocktroops (cultist_mutant, shocktrooper)"
     },
+	target_ogryns_melee = {
+        en = "Target Ogryns (Melee)"
+    },
+    target_ogryns_melee_description = {
+        en = "Automatically aim at Ogryn elites (bulwark, executor)"
+    },
     target_ogryns = {
-        en = "Target Ogryns"
+        en = "Target Ogryns (Gunners)"
     },
     target_ogryns_description = {
-        en = "Automatically aim at Ogryn elites (bulwark, executor, gunner)"
+        en = "Automatically aim at Ogryn gunners."
     }
 }
 

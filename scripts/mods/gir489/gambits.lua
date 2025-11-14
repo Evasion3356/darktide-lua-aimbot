@@ -28,8 +28,8 @@ local function get_breed_priority(breed_name)
         renegade_shocktrooper = mod:get("target_mutants"),
         renegade_shocktrooper_executioner = mod:get("target_mutants"),
         -- Ogryns
-        ogryn_bulwark = mod:get("target_ogryns"),
-        ogryn_executor = mod:get("target_ogryns"),
+        ogryn_bulwark = mod:get("target_ogryns_melee"),
+        ogryn_executor = mod:get("target_ogryns_melee"),
         ogryn_gunner = mod:get("target_ogryns")
     }
     
