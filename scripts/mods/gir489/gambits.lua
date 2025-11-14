@@ -164,7 +164,6 @@ local function auto_aim_priority_targets(player_unit)
     
     -- Get settings
     local fov_check_enabled = mod:get("enable_fov_check")
-    local priority_specials = get_priority_specials()
     
     -- Only calculate camera rotation if FoV check is enabled
     local camera_forward, fov_angle
@@ -174,17 +173,15 @@ local function auto_aim_priority_targets(player_unit)
         fov_angle = mod:get("fov_angle")
     end
     
-    -- Find and aim at priority targets
+    -- Find and aim at priority targets (already sorted by priority)
     local enemies = get_all_enemies()
     for i = 1, #enemies do
         local enemy = enemies[i]
-        if priority_specials[enemy.breed] then
-            -- Only check FoV if enabled
-            if not fov_check_enabled or is_in_fov(enemy.unit, camera_pos, camera_forward, fov_angle) then
-                if can_see_head(enemy.unit, camera_pos) then
-                    look_at_enemy_head(enemy.unit, player, camera_pos, recoil_pitch, recoil_yaw)
-                    return
-                end
+        -- Only check FoV if enabled
+        if not fov_check_enabled or is_in_fov(enemy.unit, camera_pos, camera_forward, fov_angle) then
+            if can_see_head(enemy.unit, camera_pos) then
+                look_at_enemy_head(enemy.unit, player, camera_pos, recoil_pitch, recoil_yaw)
+                return
             end
         end
     end
