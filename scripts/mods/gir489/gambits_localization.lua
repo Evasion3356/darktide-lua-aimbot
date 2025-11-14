@@ -3,7 +3,7 @@ local mod = get_mod("darktide-lua-aimbot")
 local loc = {
     mod_name = {
         en = "Priority Target Auto-Aim",
-        ru = "Авто-наведение на приоритетные цели",
+        ru = "Автонаведение на приоритетные цели",
         de = "Automatisches Zielen auf Prioritätsziele"
     },
     mod_description = {
@@ -82,7 +82,7 @@ local loc = {
     },
     aim_key_description = {
         en = "Key to activate auto-aim (only if custom key is enabled)",
-        ru = "Клавиша для активации авто-наведения (только если включена пользовательская клавиша)",
+        ru = "Клавиша для активации автонаведения (только если включена пользовательская клавиша)",
         de = "Taste zum Aktivieren des Auto-Zielens (nur wenn benutzerdefinierte Taste aktiviert ist)"
     },
     use_mouse2_fallback = {
@@ -92,7 +92,7 @@ local loc = {
     },
     use_mouse2_fallback_description = {
         en = "If enabled, auto-aim will trigger when holding Mouse2 (right click). If disabled, uses custom keybind.",
-        ru = "Если включено, авто-наведение активируется при удержании ПКМ. Если выключено — используется пользовательская клавиша.",
+        ru = "Если включено, автонаведение активируется при удержании ПКМ. Если выключено — используется пользовательская клавиша.",
         de = "Wenn aktiviert, wird Auto-Zielen beim Halten von Mouse2 (Rechtsklick) ausgelöst. Wenn deaktiviert, wird die benutzerdefinierte Taste verwendet."
     },
     
@@ -179,7 +179,7 @@ local loc = {
     },
     target_gunners_description = {
         en = "Automatically aim at Elite Gunner enemies.",
-        ru = "Автоматически наводиться на элитных Стрелков.",
+        ru = "Автоматически наводиться на Элитных Стрелков.",
         de = "Automatisch Elite-Schützen anvisieren."
     },
     target_mutants = {
@@ -194,12 +194,12 @@ local loc = {
     },
     target_ogryns_melee = {
         en = "Target Ogryns",
-        ru = "Наводиться на Огринотов",
+        ru = "Наводиться на Огринов",
         de = "Ogryns anvisieren"
     },
     target_ogryns_melee_description = {
         en = "Automatically aim at Ogryns. (Bulwark/Crusher)",
-        ru = "Автоматически наводиться на Огринотов (Щитоносец/Дробитель).",
+        ru = "Автоматически наводиться на Огринов (Щитоносец/Дробитель).",
         de = "Automatisch Ogryns anvisieren (Bulwark/Crusher)."
     }
 }
