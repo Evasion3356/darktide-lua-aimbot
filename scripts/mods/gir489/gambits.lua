@@ -1,9 +1,42 @@
-local mod = get_mod("gir489")
+local mod = get_mod("darktide-lua-aimbot")
 local aim_button_pressed = false
 
 local HALF_PI = math.pi / 2
 
--- Get all active enemy threats
+-- Get priority level for a breed
+local function get_breed_priority(breed_name)
+    local breed_mapping = {
+        -- Hounds
+        chaos_hound = mod:get("target_hounds"),
+        -- Trappers
+        renegade_netgunner = mod:get("target_netgunners"),
+        -- Flamers
+        cultist_flamer = mod:get("target_flamers"),
+        renegade_flamer = mod:get("target_flamers"),
+        -- Snipers
+        renegade_sniper = mod:get("target_snipers"),
+        -- Bombers
+        cultist_bomber = mod:get("target_bombers"),
+        renegade_grenadier = mod:get("target_bombers"),
+        renegade_grenadier_elite = mod:get("target_bombers"),
+        -- Gunners
+        cultist_gunner = mod:get("target_gunners"),
+        renegade_gunner = mod:get("target_gunners"),
+        renegade_plasma_gunner = mod:get("target_gunners"),
+        -- Mutants
+        cultist_mutant = mod:get("target_mutants"),
+        renegade_shocktrooper = mod:get("target_mutants"),
+        renegade_shocktrooper_executioner = mod:get("target_mutants"),
+        -- Ogryns
+        ogryn_bulwark = mod:get("target_ogryns"),
+        ogryn_executor = mod:get("target_ogryns"),
+        ogryn_gunner = mod:get("target_ogryns")
+    }
+    
+    return breed_mapping[breed_name] or 0
+end
+
+-- Get all active enemy threats with priorities
 local function get_all_enemies()
     local extension_manager = Managers.state and Managers.state.extension
     if not extension_manager then
@@ -27,17 +60,28 @@ local function get_all_enemies()
                     local breed = unit_data_ext:breed()
                     
                     if breed and not Breed.is_player(breed) and not breed.name:find("hazard") then
-                        n = n + 1
-                        enemies[n] = {
-                            unit = unit,
-                            breed = breed.name,
-                            position = POSITION_LOOKUP[unit]
-                        }
+                        local priority = get_breed_priority(breed.name)
+                        
+                        -- Only add enemies with priority > 0
+                        if priority > 0 then
+                            n = n + 1
+                            enemies[n] = {
+                                unit = unit,
+                                breed = breed.name,
+                                position = POSITION_LOOKUP[unit],
+                                priority = priority
+                            }
+                        end
                     end
                 end
             end
         end
     end
+    
+    -- Sort by priority (highest first)
+    table.sort(enemies, function(a, b)
+        return a.priority > b.priority
+    end)
     
     return enemies
 end

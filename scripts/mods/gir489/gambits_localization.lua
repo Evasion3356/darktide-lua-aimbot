@@ -1,4 +1,4 @@
-local mod = get_mod("gir489")
+local mod = get_mod("darktide-lua-aimbot")
 
 local loc = {
     mod_name = {
