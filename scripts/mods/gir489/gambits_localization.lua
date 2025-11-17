@@ -18,6 +18,12 @@ local loc = {
         ru = "Выкл",
         de = "Aus"
     },
+    Lowest = {
+        en = "Lowest"
+    },
+    Lower = {
+        en = "Lower",
+    },
     Low = {
         en = "Low",
         ru = "Низкий",
@@ -28,6 +34,9 @@ local loc = {
         ru = "Средний",
         de = "Mittel"
     },
+    Elevated = {
+        en = "Elevated"
+    },
     High = {
         en = "High",
         ru = "Высокий",
@@ -37,6 +46,12 @@ local loc = {
         en = "Extreme",
         ru = "Экстремальный",
         de = "Extrem"
+    },
+    Ultra = {
+        en = "Ultra"
+    },
+    Critical = {
+        en = "Critical"
     },
     
     -- General Settings
@@ -192,8 +207,14 @@ local loc = {
         ru = "Автоматически наводиться на Мутантов.",
         de = "Automatisch Mutanten anvisieren."
     },
+    target_ogryns = {
+        en = "Target Ogryn Gunners",
+    },
+    target_ogryns_description = {
+        en = "Automatically aim at gunner Ogryns (Reapers).",
+    },
     target_ogryns_melee = {
-        en = "Target Ogryns",
+        en = "Target Ogryns (Melee)",
         ru = "Наводиться на Огринов",
         de = "Ogryns anvisieren"
     },
@@ -201,6 +222,12 @@ local loc = {
         en = "Automatically aim at Ogryns. (Bulwark/Crusher)",
         ru = "Автоматически наводиться на Огринов (Щитоносец/Дробитель).",
         de = "Automatisch Ogryns anvisieren (Bulwark/Crusher)."
+    },
+    target_mauler = {
+        en = "Target Scab Maulers"
+    },
+    target_mauler_description = {
+        en = "Automatically aim at Scab Maulers.",
     }
 }
 

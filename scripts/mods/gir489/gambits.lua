@@ -6,7 +6,7 @@ local HALF_PI = math.pi / 2
 -- Get priority level for a breed
 local function get_breed_priority(breed_name)
     local breed_mapping = {
-        -- Hounds
+        -- Hound
         chaos_hound = mod:get("target_hounds"), --Pox Hound
         -- Boss Enemies
         chaos_beast_of_nurgle = mod:get("target_bosses"), --Beast of Nurgle
@@ -21,7 +21,7 @@ local function get_breed_priority(breed_name)
         -- Flamers
         cultist_flamer = mod:get("target_flamers"), --Dreg Tox Flamer
         renegade_flamer = mod:get("target_flamers"), --Scab Flamer
-        -- Snipers
+        -- Sniper
         renegade_sniper = mod:get("target_snipers"), --Sniper
         -- Bombers
         chaos_poxwalker_bomber = mod:get("target_bombers"), --Poxburster
@@ -36,6 +36,8 @@ local function get_breed_priority(breed_name)
         -- Ragers
         cultist_berzerker = mod:get("target_berzerkers"), --Dreg Rager
         renegade_berzerker = mod:get("target_berzerkers"), --Scab Rager
+        --Mauler
+        renegade_executor = mod:get("target_mauler"), --Scab Mauler
         -- Mutants
         cultist_mutant = mod:get("target_mutants"), --Mutant
         cultist_mutant_mutator = mod:get("target_mutants"), --Mutant

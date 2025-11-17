@@ -6,20 +6,40 @@ local priority_options = {
         value = 0
     },
     {
-        text = "Low",
+        text = "Lowest",
         value = 1
     },
     {
-        text = "Medium",
+        text = "Lower",
         value = 2
     },
     {
-        text = "High",
+        text = "Low",
         value = 3
     },
     {
-        text = "Extreme",
+        text = "Medium",
         value = 4
+    },
+    {
+        text = "Elevated",
+        value = 5
+    },
+    {
+        text = "High",
+        value = 6
+    },
+    {
+        text = "Extreme",
+        value = 7
+    },
+    {
+        text = "Ultra",
+        value = 8
+    },
+    {
+        text = "Critical",
+        value = 9
     }
 }
 
@@ -71,67 +91,73 @@ return {
                         setting_id = "target_bosses",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 0
+                        default_value = 1
                     },
                     {
                         setting_id = "target_berzerkers",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 0
+                        default_value = 5
                     },
                     {
                         setting_id = "target_hounds",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 4
+                        default_value = 9
                     },
                     {
                         setting_id = "target_netgunners",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 4
+                        default_value = 8
                     },
                     {
                         setting_id = "target_flamers",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 2
+                        default_value = 4
                     },
                     {
                         setting_id = "target_snipers",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 3
+                        default_value = 8
                     },
                     {
                         setting_id = "target_bombers",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 2
+                        default_value = 4
                     },
                     {
                         setting_id = "target_gunners",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 2
+                        default_value = 4
                     },
                     {
                         setting_id = "target_mutants",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 4
+                        default_value = 9
                     },
                     {
                         setting_id = "target_ogryns_melee",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 0
+                        default_value = 2
                     },
                     {
                         setting_id = "target_ogryns",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 1
+                        default_value = 3
+                    },
+                    {
+                        setting_id = "target_mauler",
+                        type = "dropdown",
+                        options = priority_options,
+                        default_value = 2
                     }
                 }
             }
