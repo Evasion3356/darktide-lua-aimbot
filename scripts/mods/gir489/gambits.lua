@@ -4,7 +4,7 @@ local aim_button_pressed = false
 local HALF_PI = math.pi / 2
 
 -- Get priority level for a breed
-local function get_breed_priority(breed_name)
+local function get_breed_priority(breed_name, unit)
     local breed_mapping = {
         -- Hound
         chaos_hound = mod:get("target_hounds"), --Pox Hound
@@ -16,6 +16,7 @@ local function get_breed_priority(breed_name)
         renegade_captain = mod:get("target_bosses"), --Scab Captain
         renegade_twin_captain = mod:get("target_bosses"), --Rodin Karnak
         renegade_twin_captain_two = mod:get("target_bosses"), --Rinda Karnak
+        chaos_daemonhost = mod:get("target_bosses"), --Daemonhost (with special check below)
         -- Trappers
         renegade_netgunner = mod:get("target_netgunners"), --Trapper
         -- Flamers
@@ -47,7 +48,22 @@ local function get_breed_priority(breed_name)
         chaos_ogryn_gunner = mod:get("target_ogryns") --Reaper
     }
     
-    return breed_mapping[breed_name] or 0
+    local priority = breed_mapping[breed_name] or 0
+    
+    -- Special check for daemonhost - only target if NOT in passive stage (STAGES.passive = 1)
+    if breed_name == "chaos_daemonhost" and priority > 0 and unit then
+        local game_object_id = Managers.state.unit_spawner:game_object_id(unit)
+        if game_object_id then
+            local game_session = Managers.state.game_session:game_session()
+            local stage = GameSession.game_object_field(game_session, game_object_id, "stage")
+            if stage == 1 then
+                -- Daemonhost is in passive stage, don't target it
+                return 0
+            end
+        end
+    end
+    
+    return priority
 end
 
 -- Get all active enemy threats with priorities
@@ -74,7 +90,7 @@ local function get_all_enemies()
                     local breed = unit_data_ext:breed()
                     
                     if breed and not Breed.is_player(breed) and not breed.name:find("hazard") then
-                        local priority = get_breed_priority(breed.name)
+                        local priority = get_breed_priority(breed.name, unit)
                         
                         -- Only add enemies with priority > 0
                         if priority > 0 then
