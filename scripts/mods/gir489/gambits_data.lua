@@ -84,6 +84,26 @@ return {
                 }
             },
             {
+                setting_id = "auto_fire_settings",
+                type = "group",
+                sub_widgets = {
+                    {
+                        setting_id = "enable_auto_fire",
+                        type = "checkbox",
+                        default_value = false
+                    },
+                    {
+                        setting_id = "auto_fire_keybind",
+                        type = "keybind",
+                        default_value = {},
+                        keybind_global = true,
+                        keybind_trigger = "held",
+                        keybind_type = "function_call",
+                        function_name = "toggle_auto_fire"
+                    }
+                }
+            },
+            {
                 setting_id = "priority_targets",
                 type = "group",
                 sub_widgets = {

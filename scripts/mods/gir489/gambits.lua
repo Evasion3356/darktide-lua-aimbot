@@ -1,7 +1,15 @@
 local mod = get_mod("darktide-lua-aimbot")
-local aim_button_pressed = false
+local Action = require("scripts/utilities/action/action")
 
+local aim_button_pressed = false
 local HALF_PI = math.pi / 2
+
+-- Auto-fire state variables
+mod._auto_fire = false
+mod._last_fire_time_passed = 0
+mod._release_fire_key = false
+mod._weapon_action_component = false
+mod._weapon_template = false
 
 -- Get priority level for a breed
 local function get_breed_priority(breed_name, unit)
@@ -76,35 +84,41 @@ local function get_all_enemies()
     local Breed = require("scripts/utilities/breed")
     local enemies = {}
     local n = 0
+	
+    local entities = extension_manager:get_entities("MinionHuskLocomotionExtension")
+    if next(entities) == nil then
+        entities = extension_manager:get_entities("MinionLocomotionExtension")
+		if next(entities) == nil then
+			return {}
+		end
+    end
     
-    for unit, _ in pairs(extension_manager:units()) do
-        if Unit.alive(unit) then
-            local health_ext = ScriptUnit.has_extension(unit, "health_system") and 
-                              ScriptUnit.extension(unit, "health_system")
-            
-            if health_ext and health_ext:is_alive() then
-                local unit_data_ext = ScriptUnit.has_extension(unit, "unit_data_system") and
-                                     ScriptUnit.extension(unit, "unit_data_system")
-                
-                if unit_data_ext then
-                    local breed = unit_data_ext:breed()
-                    
-                    if breed and not Breed.is_player(breed) and not breed.name:find("hazard") then
-                        local priority = get_breed_priority(breed.name, unit)
-                        
-                        -- Only add enemies with priority > 0
-                        if priority > 0 then
-                            n = n + 1
-                            enemies[n] = {
-                                unit = unit,
-                                breed = breed.name,
-                                position = POSITION_LOOKUP[unit],
-                                priority = priority
-                            }
-                        end
-                    end
-                end
-            end
+    for unit, _ in pairs(entities) do
+       local health_ext = ScriptUnit.has_extension(unit, "health_system") and 
+                         ScriptUnit.extension(unit, "health_system")
+       
+       if health_ext and health_ext:is_alive() then
+           local unit_data_ext = ScriptUnit.has_extension(unit, "unit_data_system") and
+                                ScriptUnit.extension(unit, "unit_data_system")
+           
+           if unit_data_ext then
+               local breed = unit_data_ext:breed()
+               
+               if breed and not Breed.is_player(breed) and not breed.name:find("hazard") then
+                   local priority = get_breed_priority(breed.name, unit)
+                   
+                   -- Only add enemies with priority > 0
+                   if priority > 0 then
+                       n = n + 1
+                       enemies[n] = {
+                           unit = unit,
+                           breed = breed.name,
+                           position = POSITION_LOOKUP[unit],
+                           priority = priority
+                       }
+                   end
+               end
+           end
         end
     end
     
@@ -217,11 +231,87 @@ local function auto_aim_priority_targets(player_unit)
     end
 end
 
-mod.toggle_aim = function()
-    aim_button_pressed = not aim_button_pressed -- true when held, false when released
+mod.toggle_aim = function(is_pressed)
+    aim_button_pressed = is_pressed
 end
 
--- Hook into update
+mod.toggle_auto_fire = function(is_pressed)
+    mod._auto_fire = is_pressed
+end
+
+-- Track when weapon is equipped
+local on_slot_wielded = function(weapon_extension, slot_name)
+    mod._weapon_action_component = weapon_extension._weapon_action_component
+    mod._weapon_template = weapon_extension._weapons[slot_name].weapon_template
+end
+
+-- Auto-fire logic hook
+local _get = function(self, input_service, action_name)
+    -- Only intercept primary fire action for in-game input when auto-fire is enabled
+    if action_name == "action_one_hold" and input_service.type == "Ingame" and mod:get("enable_auto_fire") then
+        if mod._auto_fire and not mod._release_fire_key and mod._weapon_action_component and mod._weapon_template then
+            local auto_fire = false
+            
+            -- Get current action and settings
+            local current_action_name, action_settings = Action.current_action(mod._weapon_action_component, mod._weapon_template)
+            local action_chain_attack = action_settings and action_settings.allowed_chain_actions and action_settings.allowed_chain_actions.start_attack
+            
+            -- Check if we can chain into next attack
+            if action_chain_attack and #action_chain_attack == 0 and action_chain_attack.chain_time and not action_chain_attack.chain_until then
+                local player = Managers.player:local_player_safe(1)
+                if player and player.player_unit then
+                    local weapon_system = ScriptUnit.extension(player.player_unit, "weapon_system")
+                    if weapon_system then
+                        local action_handler = weapon_system._action_handler
+                        local time_scale = 1
+                        
+                        -- Safely get time scale
+                        if action_handler and action_handler._registered_components and 
+                           action_handler._registered_components.weapon_action and 
+                           action_handler._registered_components.weapon_action.component then
+                            time_scale = action_handler._registered_components.weapon_action.component.time_scale or 1
+                        end
+                        
+                        -- Calculate chain time with time scale
+                        local chain_time = action_chain_attack.chain_time / time_scale
+                        
+                        -- Check if enough time has passed to chain
+                        if chain_time and chain_time <= mod._last_fire_time_passed then
+                            auto_fire = true
+                        end
+                    end
+                end
+            else
+                -- Can always fire if no chain restrictions
+                auto_fire = true
+            end
+            
+            -- Trigger fire and reset timing
+            if auto_fire then
+                mod._release_fire_key = true
+                mod._last_fire_time_passed = 0
+                return true
+            end
+        end
+        
+        -- Reset release flag
+        if mod._release_fire_key then
+            mod._release_fire_key = false
+        end
+        
+        -- Increment time tracker
+        mod._last_fire_time_passed = mod._last_fire_time_passed + Managers.state.game_session.fixed_time_step
+    end
+    
+    return self(input_service, action_name)
+end
+
+-- Hook into weapon system for auto-fire
+mod:hook_safe("PlayerUnitWeaponExtension", "on_slot_wielded", on_slot_wielded)
+mod:hook("InputService", "_get", _get)
+mod:hook("InputService", "_get_simulate", _get)
+
+-- Hook into update for auto-aim
 mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, unit, dt, t, frame)
     local player = Managers.player:local_player(1)
     if player and player:unit_is_alive() then

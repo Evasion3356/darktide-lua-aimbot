@@ -7,9 +7,9 @@ local loc = {
         de = "Automatisches Zielen auf Prioritätsziele"
     },
     mod_description = {
-        en = "Automatically aims at priority special enemies when right-clicking or using a custom keybind.",
-        ru = "Автоматически наводится на приоритетных особых врагов при нажатии ПКМ или пользовательской клавиши.",
-        de = "Zielt automatisch auf priorisierte Spezialgegner beim Rechtsklick oder mit einer benutzerdefinierten Taste."
+        en = "Automatically aims at priority special enemies when right-clicking or using a custom keybind. Includes optional auto-fire.",
+        ru = "Автоматически наводится на приоритетных особых врагов при нажатии ПКМ или пользовательской клавиши. Включает опциональную автоматическую стрельбу.",
+        de = "Zielt automatisch auf priorisierte Spezialgegner beim Rechtsklick oder mit einer benutzerdefinierten Taste. Enthält optionales automatisches Feuer."
     },
 
     -- Priority Levels
@@ -109,6 +109,33 @@ local loc = {
         en = "If enabled, auto-aim will trigger when holding Mouse2 (right click). If disabled, uses custom keybind.",
         ru = "Если включено, автонаведение активируется при удержании ПКМ. Если выключено — используется пользовательская клавиша.",
         de = "Wenn aktiviert, wird Auto-Zielen beim Halten von Mouse2 (Rechtsklick) ausgelöst. Wenn deaktiviert, wird die benutzerdefinierte Taste verwendet."
+    },
+    
+    -- Auto-Fire Settings
+    auto_fire_settings = {
+        en = "Auto-Fire Settings",
+        ru = "Настройки автоматической стрельбы",
+        de = "Auto-Feuer-Einstellungen"
+    },
+    enable_auto_fire = {
+        en = "Enable Auto-Fire",
+        ru = "Включить автоматическую стрельбу",
+        de = "Auto-Feuer aktivieren"
+    },
+    enable_auto_fire_description = {
+        en = "Automatically fire weapon when holding the auto-fire keybind. Works with all weapons.",
+        ru = "Автоматически стрелять из оружия при удержании клавиши автоматической стрельбы. Работает со всем оружием.",
+        de = "Automatisches Feuern der Waffe beim Halten der Auto-Feuer-Taste. Funktioniert mit allen Waffen."
+    },
+    auto_fire_keybind = {
+        en = "Auto-Fire Keybind",
+        ru = "Клавиша автоматической стрельбы",
+        de = "Auto-Feuer-Taste"
+    },
+    auto_fire_keybind_description = {
+        en = "Hold this key to automatically fire your weapon at optimal rate",
+        ru = "Удерживайте эту клавишу для автоматической стрельбы из оружия с оптимальной скоростью",
+        de = "Halten Sie diese Taste, um Ihre Waffe automatisch mit optimaler Rate zu feuern"
     },
     
     -- Priority Targets
