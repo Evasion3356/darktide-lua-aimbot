@@ -7,9 +7,9 @@ local loc = {
         de = "Automatisches Zielen auf Prioritätsziele"
     },
     mod_description = {
-        en = "Automatically aims at priority special enemies when right-clicking or using a custom keybind. Includes optional auto-fire.",
-        ru = "Автоматически наводится на приоритетных особых врагов при нажатии ПКМ или пользовательской клавиши. Включает опциональную автоматическую стрельбу.",
-        de = "Zielt automatisch auf priorisierte Spezialgegner beim Rechtsklick oder mit einer benutzerdefinierten Taste. Enthält optionales automatisches Feuer."
+        en = "Automatically aims at priority special enemies when right-clicking or using a custom keybind. Includes optional triggerbot.",
+        ru = "Автоматически наводится на приоритетных особых врагов при нажатии ПКМ или пользовательской клавиши. Включает опциональный триггербот.",
+        de = "Zielt automatisch auf priorisierte Spezialgegner beim Rechtsklick oder mit einer benutzerdefinierten Taste. Enthält optionalen Triggerbot."
     },
 
     -- Priority Levels
@@ -19,10 +19,14 @@ local loc = {
         de = "Aus"
     },
     Lowest = {
-        en = "Lowest"
+        en = "Lowest",
+        ru = "Самый низкий",
+        de = "Am niedrigsten"
     },
     Lower = {
         en = "Lower",
+        ru = "Ниже",
+        de = "Niedriger"
     },
     Low = {
         en = "Low",
@@ -35,7 +39,9 @@ local loc = {
         de = "Mittel"
     },
     Elevated = {
-        en = "Elevated"
+        en = "Elevated",
+        ru = "Повышенный",
+        de = "Erhöht"
     },
     High = {
         en = "High",
@@ -48,10 +54,14 @@ local loc = {
         de = "Extrem"
     },
     Ultra = {
-        en = "Ultra"
+        en = "Ultra",
+        ru = "Ультра",
+        de = "Ultra"
     },
     Critical = {
-        en = "Critical"
+        en = "Critical",
+        ru = "Критический",
+        de = "Kritisch"
     },
     
     -- General Settings
@@ -111,31 +121,61 @@ local loc = {
         de = "Wenn aktiviert, wird Auto-Zielen beim Halten von Mouse2 (Rechtsklick) ausgelöst. Wenn deaktiviert, wird die benutzerdefinierte Taste verwendet."
     },
     
-    -- Auto-Fire Settings
-    auto_fire_settings = {
-        en = "Auto-Fire Settings",
-        ru = "Настройки автоматической стрельбы",
-        de = "Auto-Feuer-Einstellungen"
+    -- Triggerbot Settings
+    triggerbot_settings = {
+        en = "Triggerbot Settings",
+        ru = "Настройки триггербота",
+        de = "Triggerbot-Einstellungen"
     },
-    enable_auto_fire = {
-        en = "Enable Auto-Fire",
-        ru = "Включить автоматическую стрельбу",
-        de = "Auto-Feuer aktivieren"
+    enable_triggerbot = {
+        en = "Enable Triggerbot",
+        ru = "Включить триггербот",
+        de = "Triggerbot aktivieren"
     },
-    enable_auto_fire_description = {
-        en = "Automatically fire weapon when holding the auto-fire keybind.",
-        ru = "Автоматически стрелять из оружия при удержании клавиши автоматической стрельбы.",
-        de = "Automatisches Feuern der Waffe beim Halten der Auto-Feuer-Taste."
+    enable_triggerbot_description = {
+        en = "Automatically fire weapon when conditions are met.",
+        ru = "Автоматически стрелять из оружия при выполнении условий.",
+        de = "Automatisches Feuern der Waffe, wenn Bedingungen erfüllt sind."
     },
-    auto_fire_keybind = {
-        en = "Auto-Fire Keybind",
-        ru = "Клавиша автоматической стрельбы",
-        de = "Auto-Feuer-Taste"
+    triggerbot_use_raycast = {
+        en = "Use Raycast Mode",
+        ru = "Использовать режим трассировки луча",
+        de = "Raycast-Modus verwenden"
     },
-    auto_fire_keybind_description = {
-        en = "If unbound, it will auto fire when the aimbot is normally active.",
-        ru = "Если привязка не применяется, то стрельба будет производиться автоматически, когда аимбот будет активен.",
-        de = "Wenn die Bindung nicht aktiviert ist, feuert es automatisch, wenn der Aimbot normalerweise aktiv ist."
+    triggerbot_use_raycast_description = {
+        en = "If enabled, fires when crosshair is directly on an enemy. If disabled, fires when aimbot has locked onto a target.",
+        ru = "Если включено, стреляет, когда прицел наведён прямо на врага. Если выключено — стреляет, когда аимбот захватил цель.",
+        de = "Wenn aktiviert, feuert bei direktem Fadenkreuz auf Feind. Wenn deaktiviert, feuert wenn Aimbot ein Ziel erfasst hat."
+    },
+    triggerbot_keybind = {
+        en = "Triggerbot Keybind",
+        ru = "Клавиша триггербота",
+        de = "Triggerbot-Taste"
+    },
+    triggerbot_keybind_description = {
+        en = "If unbound, triggerbot will activate automatically when enabled.",
+        ru = "Если не привязана, триггербот будет активироваться автоматически при включении.",
+        de = "Wenn nicht gebunden, aktiviert sich der Triggerbot automatisch, wenn er aktiviert ist."
+    },
+    triggerbot_weakspot_only = {
+        en = "Weakspot Only",
+        ru = "Только слабые места",
+        de = "Nur Schwachstellen"
+    },
+    triggerbot_weakspot_only_description = {
+        en = "If enabled, triggerbot will only fire when aiming at enemy weakspots.",
+        ru = "Если включено, триггербот будет стрелять только при наведении на слабые места врагов.",
+        de = "Wenn aktiviert, feuert der Triggerbot nur beim Zielen auf feindliche Schwachstellen."
+    },
+    triggerbot_respect_priority = {
+        en = "Respect Priority Targets",
+        ru = "Учитывать приоритетные цели",
+        de = "Prioritätsziele beachten"
+    },
+    triggerbot_respect_priority_description = {
+        en = "If enabled, triggerbot will only fire at enemies marked as priority targets. This only applies to Raycast Mode.",
+        ru = "Если включено, триггербот будет стрелять только по врагам, отмеченным как приоритетные цели. Это применимо только к режиму Raycast.",
+        de = "Wenn aktiviert, feuert der Triggerbot nur auf als Prioritätsziele markierte Gegner. Dies gilt nur für den Raycast-Modus."
     },
     
     -- Priority Targets
@@ -235,10 +275,14 @@ local loc = {
         de = "Automatisch Mutanten anvisieren."
     },
     target_ogryns = {
-        en = "Target Ogryn Gunners",
+        en = "Target Ogryns (Gunner)",
+        ru = "Наводиться на Огринов (Стрелков)",
+        de = "Ogryns anvisieren (Schützen)"
     },
     target_ogryns_description = {
-        en = "Automatically aim at gunner Ogryns (Reapers).",
+        en = "Automatically aim at Ogryns. (Gunner/Brute)",
+        ru = "Автоматически наводиться на Огринов (Стрелков/Громил).",
+        de = "Automatisch Ogryns anvisieren (Schützen/Brute)."
     },
     target_ogryns_melee = {
         en = "Target Ogryns (Melee)",
@@ -251,10 +295,35 @@ local loc = {
         de = "Automatisch Ogryns anvisieren (Bulwark/Crusher)."
     },
     target_mauler = {
-        en = "Target Scab Maulers"
+        en = "Target Scab Maulers",
+        ru = "Наводиться на Бешеных Шрамников",
+        de = "Scab-Maulere anvisieren"
     },
     target_mauler_description = {
         en = "Automatically aim at Scab Maulers.",
+        ru = "Автоматически наводиться на Бешеных Шрамников.",
+        de = "Automatisch Scab-Maulere anvisieren."
+    },
+
+    debug = {
+        en = "Debug",
+        ru = "Отладка",
+        de = "Debug"
+    },
+    debug_description = {
+        en = "Enable debug messages in the console.",
+        ru = "Включить отладочные сообщения в консоли.",
+        de = "Debug-Nachrichten in der Konsole aktivieren."
+    },
+    enable_logging = {
+        en = "Enable Logging",
+        ru = "Включить логирование",
+        de = "Protokollierung aktivieren"
+    },
+    enable_logging_description = {
+        en = "If enabled, debug messages will be printed to the console.",
+        ru = "Если включено, отладочные сообщения будут выводиться в консоль.",
+        de = "Wenn aktiviert, werden Debug-Nachrichten in der Konsole ausgegeben."
     }
 }
 

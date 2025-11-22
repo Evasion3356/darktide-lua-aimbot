@@ -84,22 +84,37 @@ return {
                 }
             },
             {
-                setting_id = "auto_fire_settings",
+                setting_id = "triggerbot_settings",
                 type = "group",
                 sub_widgets = {
                     {
-                        setting_id = "enable_auto_fire",
+                        setting_id = "enable_triggerbot",
                         type = "checkbox",
                         default_value = false
                     },
                     {
-                        setting_id = "auto_fire_keybind",
+                        setting_id = "triggerbot_use_raycast",
+                        type = "checkbox",
+                        default_value = false
+                    },
+                    {
+                        setting_id = "triggerbot_weakspot_only",
+                        type = "checkbox",
+                        default_value = true
+                    },
+                    {
+                        setting_id = "triggerbot_respect_priority",
+                        type = "checkbox",
+                        default_value = true
+                    },
+                    {
+                        setting_id = "triggerbot_keybind",
                         type = "keybind",
                         default_value = {},
                         keybind_global = true,
                         keybind_trigger = "held",
                         keybind_type = "function_call",
-                        function_name = "toggle_auto_fire"
+                        function_name = "toggle_triggerbot"
                     }
                 }
             },
@@ -180,7 +195,18 @@ return {
                         default_value = 2
                     }
                 }
-            }
+            },
+            {
+                setting_id = "debug",
+                type = "group",
+                sub_widgets = {
+                    {
+                        setting_id = "enable_logging",
+                        type = "checkbox",
+                        default_value = false
+                    }
+                }
+            },
         }
     }
 }

@@ -1,5 +1,10 @@
 local mod = get_mod("darktide-lua-aimbot")
-local Action = require("scripts/utilities/action/action")
+
+local Breed = require("scripts/utilities/breed")
+local HitZone = require("scripts/utilities/attack/hit_zone")
+local Recoil = require("scripts/utilities/recoil")
+local Sway = require("scripts/utilities/sway")
+local WeaponTemplate = require("scripts/utilities/weapon/weapon_template")
 
 -- Constants
 local HALF_PI = math.pi / 2
@@ -7,7 +12,7 @@ local DAEMONHOST_PASSIVE_STAGE = 1
 
 -- State variables
 local aim_button_pressed = false
-local auto_fire_pressed = false
+local triggerbot_pressed = false
 local has_target = false
 
 -- Cache frequently accessed values
@@ -19,16 +24,15 @@ local Vector3_normalize = Vector3.normalize
 local Vector3_dot = Vector3.dot
 local Vector3_length = Vector3.length
 
--- Breed priority mapping (cached to avoid repeated function calls)
-local breed_priority_cache = {}
+function log_to_console(message)
+    local dmf = get_mod("DMF")
+    if mod:get("enable_logging") and dmf:get("show_developer_console") then
+        print(message)
+    end
+end
 
 -- Get priority level for a breed (with caching)
 local function get_breed_priority(breed_name, unit)
-    local cached = breed_priority_cache[breed_name]
-    if cached ~= nil and breed_name ~= "chaos_daemonhost" then
-        return cached
-    end
-    
     local priority_map = {
         -- Hound
         chaos_hound = "target_hounds", --Pox Hound
@@ -89,9 +93,6 @@ local function get_breed_priority(breed_name, unit)
                 return 0
             end
         end
-    else
-        -- Cache non-daemonhost priorities
-        breed_priority_cache[breed_name] = priority
     end
     
     return priority
@@ -168,18 +169,15 @@ local function is_in_fov(enemy_unit, camera_pos, camera_forward, min_dot)
     return Vector3_dot(camera_forward, to_enemy) >= min_dot
 end
 
--- Check if player can see enemy's head
-local function can_see_head(enemy_unit, camera_pos)
+local function can_visibly_see_target(enemy_unit, camera_pos)
     local head_node = Unit.node(enemy_unit, "j_head")
-    if not head_node then
-        return false
-    end
-    
+    if not head_node then return false end
+
     local head_pos = Unit.world_position(enemy_unit, head_node)
     local dir = head_pos - camera_pos
     local dist = Vector3_length(dir)
     Vector3_normalize(dir)
-    
+
     local hit, _, _, _, actor = PhysicsWorld.raycast(
         World.physics_world(Application.main_world()),
         camera_pos,
@@ -189,9 +187,102 @@ local function can_see_head(enemy_unit, camera_pos)
         "collision_filter",
         "filter_ray_aim_assist_line_of_sight"
     )
-    
+
     return not hit or Actor.unit(actor) == enemy_unit
 end
+
+local function is_crosshair_on_enemy()
+    local player = Managers.player:local_player(1)
+    if not player or not player.player_unit then
+        return false
+    end
+
+    local camera_pos = Managers.state.camera:camera_position(player.viewport_name)
+    local camera_rot = Managers.state.camera:camera_rotation(player.viewport_name)
+
+    -- Apply recoil/sway
+    local unit_data_ext = ScriptUnit.extension(player.player_unit, "unit_data_system")
+    local weapon_extension = ScriptUnit.extension(player.player_unit, "weapon_system")
+    local recoil_template = weapon_extension:recoil_template()
+    local sway_template = weapon_extension:sway_template()
+    local movement_state_component = unit_data_ext:read_component("movement_state")
+    local recoil_component = unit_data_ext:read_component("recoil")
+    local sway_component = unit_data_ext:read_component("sway")
+
+    local ray_rotation = Recoil.apply_weapon_recoil_rotation(recoil_template, recoil_component, movement_state_component, camera_rot)
+    ray_rotation = Sway.apply_sway_rotation(sway_template, sway_component, movement_state_component, ray_rotation)
+
+    local direction = Quaternion.forward(ray_rotation)
+
+    local physics_world = World.physics_world(Application.main_world())
+    local max_distance = 300 -- or weapon range
+
+    -- Collect statics (walls/environment)
+    local hits = PhysicsWorld.raycast(
+        physics_world,
+        camera_pos,
+        direction,
+        max_distance,
+        "all",
+        "types", "both",
+        "max_hits", 64,
+        "collision_filter", "filter_player_character_shooting_raycast"
+    )
+
+    if not hits or #hits == 0 then
+		log_to_console("[Triggerbot] No hits.")
+        return false
+    end
+
+    -- Iterate hits in order
+    for i = 1, #hits do
+        local hit = hits[i]
+        local actor = hit.actor or hit[4]
+        if actor then
+            local hit_unit = Actor.unit(actor)
+
+			log_to_console("[Triggerbot] Unit["..tostring(i).."] :" .. tostring(hit_unit))
+            -- Skip self
+            if hit_unit and hit_unit ~= player.player_unit then
+                -- Check if enemy is alive
+                if ScriptUnit.has_extension(hit_unit, "health_system") then
+                    local health_ext = ScriptUnit.extension(hit_unit, "health_system")
+                    if health_ext and health_ext:is_alive() then
+						log_to_console("[Triggerbot] Unit["..tostring(i).."] :" .. tostring(hit_unit) .. " is alive")
+                        local breed = Breed.unit_breed_or_nil(hit_unit)
+                        if breed and not Breed.is_player(breed) and not (breed.name and breed.name:find("hazard")) then
+                            if (mod:get("triggerbot_respect_priority")) then
+                                local priority = get_breed_priority(breed.name, hit_unit)
+                                log_to_console("[Triggerbot] triggerbot_respect_priority on, checking priority: "..tostring(priority))
+                                if priority == 0 then
+                                    return false
+                                end
+                            end
+							log_to_console("[Triggerbot] Unit["..tostring(i).."] :" .. tostring(hit_unit) .. " is not a hazard or a player.")
+                            -- Resolve hit zone
+                            local zone = HitZone.get_name(hit_unit, actor)
+                            if zone == HitZone.hit_zone_names.head then
+								log_to_console("[Triggerbot] Unit["..tostring(i).."] :" .. tostring(hit_unit) .. " hit head.")
+								return can_visibly_see_target(hit_unit, camera_pos) --Check for walls
+                            elseif not mod:get("triggerbot_weakspot_only") then
+                                log_to_console("[Triggerbot] Unit["..tostring(i).."] :" .. tostring(hit_unit) .. " hit non-head weakspot only enabled.")
+                                if zone and zone ~= HitZone.hit_zone_names.afro then
+                                    log_to_console("[Triggerbot] Unit["..tostring(i).."] :" .. tostring(hit_unit) .. " hit something: "..tostring(zone))
+                                    return can_visibly_see_target(hit_unit, camera_pos) --Check for walls
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+	
+	log_to_console("[Triggerbot] Nothing hit.")
+
+    return false
+end
+
 
 -- Look at an enemy's head with recoil compensation
 local function look_at_enemy_head(enemy_unit, player, camera_pos, recoil_pitch, recoil_yaw)
@@ -240,27 +331,29 @@ local function auto_aim_priority_targets(player_unit)
     
     -- Find and aim at priority targets
     local enemies = get_all_enemies()
+	log_to_console("[Aimbot] Begin finding enemy")
     for i = 1, #enemies do
         local enemy = enemies[i]
         
         if not fov_check_enabled or is_in_fov(enemy.unit, camera_pos, camera_forward, min_dot) then
-            if can_see_head(enemy.unit, camera_pos) then
+            if can_visibly_see_target(enemy.unit, camera_pos) then
                 look_at_enemy_head(enemy.unit, player, camera_pos, recoil_pitch, recoil_yaw)
                 has_target = true
+				log_to_console("[Aimbot] Found target.")
                 return
             end
         end
     end
     
-    has_target = false
+	log_to_console("[Aimbot] No target.")
 end
 
 mod.toggle_aim = function(is_pressed)
     aim_button_pressed = is_pressed
 end
 
-mod.toggle_auto_fire = function(is_pressed)
-    auto_fire_pressed = is_pressed
+mod.toggle_triggerbot = function(is_pressed)
+    triggerbot_pressed = is_pressed
 end
 
 -- Detect weapon firing mode from template
@@ -327,7 +420,6 @@ local function get_current_weapon_info()
     local alternate_fire_component = unit_data_ext:read_component("alternate_fire")
     local is_ads = alternate_fire_component and alternate_fire_component.is_active or false
     
-    local WeaponTemplate = require("scripts/utilities/weapon/weapon_template")
     local weapon_template = WeaponTemplate.current_weapon_template(weapon_action_component)
     
     if not weapon_template then
@@ -338,7 +430,7 @@ local function get_current_weapon_info()
     return weapon_template, fire_mode, is_ads
 end
 
--- Auto-fire logic hook (optimized with early returns)
+-- Triggerbot logic hook (optimized with early returns)
 local _get = function(self, input_service, action_name)
     local is_fire_input = (action_name == "action_one_hold" or action_name == "action_one_pressed") and input_service.type == "Ingame"
     
@@ -346,23 +438,57 @@ local _get = function(self, input_service, action_name)
         return self(input_service, action_name)
     end
     
-    local auto_fire_enabled = mod:get("enable_auto_fire")
-    local should_fire = (auto_fire_pressed or next(mod:get("auto_fire_keybind")) == nil) and has_target
+    local triggerbot_enabled = mod:get("enable_triggerbot")
     
-    if auto_fire_enabled and should_fire then
-        local weapon_template, fire_mode, is_ads = get_current_weapon_info()
+    if not triggerbot_enabled then
+        return self(input_service, action_name)
+    end
+    
+    local keybind = mod:get("triggerbot_keybind")
+    local has_keybind = next(keybind) ~= nil
+    local should_fire = (triggerbot_pressed or not has_keybind)
+    
+    log_to_console("[Triggerbot] Action: " .. action_name .. 
+             " | Enabled: " .. tostring(triggerbot_enabled) ..
+             " | Has keybind: " .. tostring(has_keybind) ..
+             " | Pressed: " .. tostring(triggerbot_pressed) ..
+             " | Should fire: " .. tostring(should_fire))
+    
+    if triggerbot_enabled and should_fire then
+        local use_raycast = mod:get("triggerbot_use_raycast")
+        log_to_console("[Triggerbot] Use raycast mode: " .. tostring(use_raycast))
         
-        if (fire_mode == "charge" or fire_mode == "full_auto") and action_name == "action_one_hold" then
-            return true
-        elseif fire_mode == "semi_auto" and action_name == "action_one_pressed" then
-            return true
+        local can_fire = false
+        
+        if use_raycast then
+            -- Raycast mode: fire if crosshair is directly on enemy
+            can_fire = is_crosshair_on_enemy()
+        else
+            -- Legacy mode: fire if aimbot has locked onto target
+            can_fire = has_target
+            log_to_console("[Triggerbot] Legacy mode - has_target: " .. tostring(has_target))
+        end
+        
+        log_to_console("[Triggerbot] Can fire: " .. tostring(can_fire))
+        
+        if can_fire then
+            local weapon_template, fire_mode, is_ads = get_current_weapon_info()
+            log_to_console("[Triggerbot] Fire mode: " .. tostring(fire_mode) .. " | Action: " .. action_name)
+            
+            if (fire_mode == "charge" or fire_mode == "full_auto") and action_name == "action_one_hold" then
+                log_to_console("[Triggerbot] FIRING (hold)")
+                return true
+            elseif fire_mode == "semi_auto" and action_name == "action_one_pressed" then
+                log_to_console("[Triggerbot] FIRING (pressed)")
+                return true
+            end
         end
     end
     
     return self(input_service, action_name)
 end
 
--- Hook into weapon system for auto-fire
+-- Hook into weapon system for triggerbot
 mod:hook("InputService", "_get", _get)
 mod:hook("InputService", "_get_simulate", _get)
 
@@ -377,6 +503,7 @@ mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, u
     local should_aim = (use_mouse2 and Mouse.button(Mouse.button_index("right")) > 0.5) or 
                       (not use_mouse2 and aim_button_pressed)
     
+    has_target = false
     if should_aim then
         auto_aim_priority_targets(unit)
     end
