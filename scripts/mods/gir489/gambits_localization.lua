@@ -123,9 +123,9 @@ local loc = {
         de = "Auto-Feuer aktivieren"
     },
     enable_auto_fire_description = {
-        en = "Automatically fire weapon when holding the auto-fire keybind. Works with all weapons.",
-        ru = "Автоматически стрелять из оружия при удержании клавиши автоматической стрельбы. Работает со всем оружием.",
-        de = "Automatisches Feuern der Waffe beim Halten der Auto-Feuer-Taste. Funktioniert mit allen Waffen."
+        en = "Automatically fire weapon when holding the auto-fire keybind.",
+        ru = "Автоматически стрелять из оружия при удержании клавиши автоматической стрельбы.",
+        de = "Automatisches Feuern der Waffe beim Halten der Auto-Feuer-Taste."
     },
     auto_fire_keybind = {
         en = "Auto-Fire Keybind",
@@ -133,9 +133,9 @@ local loc = {
         de = "Auto-Feuer-Taste"
     },
     auto_fire_keybind_description = {
-        en = "Hold this key to automatically fire your weapon at optimal rate",
-        ru = "Удерживайте эту клавишу для автоматической стрельбы из оружия с оптимальной скоростью",
-        de = "Halten Sie diese Taste, um Ihre Waffe automatisch mit optimaler Rate zu feuern"
+        en = "If unbound, it will auto fire when the aimbot is normally active.",
+        ru = "Если привязка не применяется, то стрельба будет производиться автоматически, когда аимбот будет активен.",
+        de = "Wenn die Bindung nicht aktiviert ist, feuert es automatisch, wenn der Aimbot normalerweise aktiv ist."
     },
     
     -- Priority Targets
