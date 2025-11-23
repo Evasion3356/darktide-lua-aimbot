@@ -1,10 +1,6 @@
 local mod = get_mod("darktide-lua-aimbot")
-
-local Breed = require("scripts/utilities/breed")
+local Action = require("scripts/utilities/action/action")
 local HitZone = require("scripts/utilities/attack/hit_zone")
-local Recoil = require("scripts/utilities/recoil")
-local Sway = require("scripts/utilities/sway")
-local WeaponTemplate = require("scripts/utilities/weapon/weapon_template")
 
 -- Constants
 local HALF_PI = math.pi / 2
@@ -24,9 +20,11 @@ local Vector3_normalize = Vector3.normalize
 local Vector3_dot = Vector3.dot
 local Vector3_length = Vector3.length
 
+local log_debug = true
+
 function log_to_console(message)
     local dmf = get_mod("DMF")
-    if mod:get("enable_logging") and dmf:get("show_developer_console") then
+    if log_debug and dmf:get("show_developer_console") then
         print(message)
     end
 end
@@ -169,39 +167,519 @@ local function is_in_fov(enemy_unit, camera_pos, camera_forward, min_dot)
     return Vector3_dot(camera_forward, to_enemy) >= min_dot
 end
 
-local function can_visibly_see_target(enemy_unit, camera_pos)
+local AttackSettings = require("scripts/settings/damage/attack_settings")
+local Breed = require("scripts/utilities/breed")
+local DamageProfile = require("scripts/utilities/attack/damage_profile")
+local Dodge = require("scripts/extension_systems/character_state_machine/character_states/utilities/dodge")
+local DodgeSettings = require("scripts/settings/dodge/dodge_settings")
+local RangedAction = require("scripts/utilities/action/ranged_action")
+local HitMass = require("scripts/utilities/attack/hit_mass")
+local Weakspot = require("scripts/utilities/attack/weakspot")
+local HazardProp = require("scripts/utilities/level_props/hazard_prop")
+local Health = require("scripts/utilities/health")
+local ObjectPenetration = require("scripts/utilities/attack/object_penetration")
+
+local attack_types = AttackSettings.attack_types
+local dodge_types = DodgeSettings.dodge_types
+
+-- Helper: process hits similar to HitScan.process_hits but without side effects
+local HitScan = require("scripts/utilities/attack/hit_scan")
+local Sprint = require("scripts/extension_systems/character_state_machine/character_states/utilities/sprint")
+
+-- Helper: process hits similar to HitScan.process_hits but without side effects
+local function process_hits_visibility(is_server, world, physics_world, attacker_unit, hits, position, direction, max_distance, optional_is_local_unit, optional_player, hit_scan_template, target_unit)
+    if not hits then
+        return false
+    end
+
+    log_to_console("[PHV] process_hits_visibility called, hits_count=" .. tostring(#hits) .. " target=" .. tostring(target_unit))
+
+    local HIT_UNITS = {}
+    HIT_UNITS[attacker_unit] = true
+
+    local damage_config = hit_scan_template and hit_scan_template.damage
+    local impact_config = damage_config and damage_config.impact
+    local penetration_config = damage_config and damage_config.penetration
+    local damage_profile = damage_config and impact_config and impact_config.damage_profile
+    
+    -- If no penetration config exists, create a default one for visibility checks
+    -- This allows the aimbot to see through thin walls even if the weapon doesn't penetrate
+    if not penetration_config then
+        log_to_console("[PHV] No penetration_config found, using default")
+        penetration_config = {
+            depth = 0.5,  -- 0.5 meters default penetration for visibility
+            destroy_on_exit = false
+        }
+    end
+
+    -- follow engine style for optional attacker breed
+    local optional_attacker_data_extension = ScriptUnit.has_extension(attacker_unit, "unit_data_system") and ScriptUnit.extension(attacker_unit, "unit_data_system")
+    local optional_attacker_breed = optional_attacker_data_extension and optional_attacker_data_extension:breed()
+    local is_attacker_player = Breed.is_player(optional_attacker_breed)
+
+    local damage_profile_lerp_values = nil
+    local hit_mass_budget_attack, hit_mass_budget_impact = nil, nil
+
+    if damage_profile then
+        damage_profile_lerp_values = DamageProfile.lerp_values(damage_profile, attacker_unit)
+        hit_mass_budget_attack, hit_mass_budget_impact = DamageProfile.max_hit_mass(damage_profile, 1, 0, damage_profile_lerp_values, false, attacker_unit, attack_types.ranged)
+    end
+
+    local exit_distance = 0
+    local penetrated = false
+    local try_penetration = penetration_config ~= nil  -- Now always true with default config
+
+    -- iterate in distance order - use while loop so we can process newly added hits
+    local index = 1
+    while index <= #hits do
+        local hit = hits[index]
+        local hit_position = hit.position or hit[1]
+        local hit_distance = hit.distance or hit[2] or 0
+        local hit_actor = hit.actor or hit[4]
+
+        log_to_console("[PHV] Hit[" .. index .. "] dist=" .. tostring(hit_distance) .. " actor_present=" .. tostring(hit_actor ~= nil) .. " pos=" .. tostring(hit_position))
+
+        -- Skip hits inside penetrated object
+        if hit_distance < exit_distance then
+            log_to_console("[PHV] Hit[" .. index .. "] behind exit_distance=" .. tostring(exit_distance) .. ", skipping")
+            goto continue
+        end
+
+        if hit_actor then
+            local hit_unit = Actor.unit(hit_actor)
+
+            log_to_console("[PHV] Hit[" .. index .. "] actor unit=" .. tostring(hit_unit))
+
+            if HIT_UNITS[hit_unit] then
+                log_to_console("[PHV] Hit[" .. index .. "] unit already in HIT_UNITS, skipping")
+                goto continue
+            end
+
+            local hit_zone_name = HitZone.get_name(hit_unit, hit_actor)
+            local hit_afro = hit_zone_name == HitZone.hit_zone_names.afro
+            local target_breed_or_nil = Breed.unit_breed_or_nil(hit_unit)
+            local is_damagable = Health.is_damagable(hit_unit)
+            local target_is_hazard_prop, hazard_prop_is_active = HazardProp.status(hit_unit)
+
+            log_to_console("[PHV] Hit[" .. index .. "] zone=" .. tostring(hit_zone_name) .. " breed=" .. tostring(target_breed_or_nil and target_breed_or_nil.name) .. " damagable=" .. tostring(is_damagable) .. " hazard_prop=" .. tostring(target_is_hazard_prop))
+            
+            -- Check if this is actually a static/environment hit (has actor but not damagable and no breed)
+            -- This happens when walls/environment have actors attached
+            if not is_damagable and not target_breed_or_nil and not target_is_hazard_prop then
+                log_to_console("[PHV] Hit[" .. index .. "] actor is static environment (not damagable, no breed)")
+                -- Treat as environment hit - jump to penetration logic below
+                goto handle_environment_hit
+            end
+
+            -- Ragdoll handling: treat as occlusion
+            if Health.is_ragdolled(hit_unit) then
+                log_to_console("[PHV] Hit[" .. index .. "] unit is ragdolled")
+                if hit_afro then
+                    log_to_console("[PHV] Hit[" .. index .. "] afro hit on ragdoll - continue")
+                    goto continue
+                end
+
+                log_to_console("[PHV] Hit[" .. index .. "] ragdoll treated as occlusion -> return false")
+                return false
+            elseif is_damagable then
+                -- faded player check
+                if is_attacker_player and HitScan and HitScan.inside_faded_player and HitScan.inside_faded_player(target_breed_or_nil, hit_distance) then
+                    log_to_console("[PHV] Hit[" .. index .. "] inside faded player - continue")
+                    goto continue
+                end
+
+                if not target_is_hazard_prop then
+                    -- dodge handling: treat dodging as occlusion
+                    local is_undodgeable = damage_profile and damage_profile.undodgeable
+
+                    if not is_undodgeable and is_server then
+                        local is_dodging, dodge_type = Dodge.is_dodging(hit_unit, attack_types.ranged)
+                        local is_sprint_dodging = Sprint and Sprint.is_sprint_dodging and Sprint.is_sprint_dodging(hit_unit, attacker_unit, damage_profile and damage_profile.run_away_dodge)
+
+                        log_to_console("[PHV] Hit[" .. index .. "] dodging=" .. tostring(is_dodging) .. " sprint_dodging=" .. tostring(is_sprint_dodging))
+
+                        if is_dodging or is_sprint_dodging then
+                            HIT_UNITS[hit_unit] = true
+                            log_to_console("[PHV] Hit[" .. index .. "] dodging treated as occlusion -> return false")
+                            return false
+                        end
+                    end
+
+                    if hit_afro then
+                        log_to_console("[PHV] Hit[" .. index .. "] afro hit - skipping")
+                        goto continue
+                    end
+                end
+
+                local hit_weakspot = Weakspot.hit_weakspot(target_breed_or_nil, hit_zone_name, attacker_unit)
+
+                -- Check if this is the target unit FIRST before hit mass checks
+                if hit_unit == target_unit then
+                    log_to_console("[PHV] Hit[" .. index .. "] hit is target unit")
+                    if hit_zone_name == HitZone.hit_zone_names.shield then
+                        log_to_console("[PHV] Hit[" .. index .. "] hit shield -> return false")
+                        return false
+                    end
+                    if hit_zone_name == HitZone.hit_zone_names.head then
+                        log_to_console("[PHV] Hit[" .. index .. "] head hit on target -> return true")
+                        return true
+                    end
+
+                    -- hit other zone on same unit -> occluded for head
+                    log_to_console("[PHV] Hit[" .. index .. "] hit non-head on target -> return false")
+                    return false
+                end
+
+                -- Only do hit mass checks for non-target units
+                if damage_profile then
+                    log_to_console("[PHV] Hit[" .. index .. "] consuming hit mass budgets")
+                    hit_mass_budget_attack, hit_mass_budget_impact = HitMass.consume_hit_mass(attacker_unit, hit_unit, hit_mass_budget_attack, hit_mass_budget_impact, hit_weakspot, false, attack_types.ranged)
+                    local stop = HitMass.stopped_attack(hit_unit, hit_zone_name, hit_mass_budget_attack, hit_mass_budget_impact, impact_config)
+
+                    log_to_console("[PHV] Hit[" .. index .. "] stopped_attack=" .. tostring(stop))
+
+                    if stop then
+                        log_to_console("[PHV] Hit[" .. index .. "] stopped the ray (non-target) -> return false")
+                        return false
+                    end
+                end
+
+                -- not target unit: if it didn't stop the ray, mark as hit and continue (penetrable)
+                log_to_console("[PHV] Hit[" .. index .. "] hit other (damagable) unit before target - marking and continuing")
+                HIT_UNITS[hit_unit] = true
+                goto continue
+            else
+                -- non-damagable actor that's NOT a static environment -> occlusion
+                log_to_console("[PHV] Hit[" .. index .. "] non-damagable non-static actor occludes -> return false")
+                return false
+            end
+        end
+        
+        -- Label for environment/static hit handling (can jump here from above)
+        ::handle_environment_hit::
+        do
+            -- environment/static hit - THIS IS WHERE PENETRATION HAPPENS
+            log_to_console("[PHV] Hit[" .. index .. "] environment/static hit at dist=" .. tostring(hit_distance))
+            log_to_console("[PHV] Hit[" .. index .. "] try_penetration=" .. tostring(try_penetration) .. " penetrated=" .. tostring(penetrated))
+            log_to_console("[PHV] Hit[" .. index .. "] hit_scan_template=" .. tostring(hit_scan_template))
+            log_to_console("[PHV] Hit[" .. index .. "] damage_config=" .. tostring(damage_config))
+            log_to_console("[PHV] Hit[" .. index .. "] impact_config=" .. tostring(impact_config))
+            log_to_console("[PHV] Hit[" .. index .. "] penetration_config=" .. tostring(penetration_config))
+            
+            if penetration_config then
+                log_to_console("[PHV] Hit[" .. index .. "] penetration_config.depth=" .. tostring(penetration_config.depth))
+                log_to_console("[PHV] Hit[" .. index .. "] penetration_config.destroy_on_exit=" .. tostring(penetration_config.destroy_on_exit))
+            end
+            
+            -- Try penetration if enabled and not already penetrated
+            if try_penetration and not penetrated then
+                log_to_console("[PHV] Hit[" .. index .. "] attempting penetration depth=" .. tostring(penetration_config.depth))
+                local exit_pos, exit_normal, exit_unit = ObjectPenetration.test_for_penetration(physics_world, hit_position, direction, penetration_config.depth)
+
+                if exit_pos then
+                    -- Successfully penetrated!
+                    local object_thickness = Vector3.distance(hit_position, exit_pos)
+                    exit_distance = hit_distance + object_thickness
+                    penetrated = true
+                    try_penetration = false  -- Only penetrate once
+                    
+                    log_to_console("[PHV] Hit[" .. index .. "] penetrated object thickness=" .. tostring(object_thickness) .. " new exit_distance=" .. tostring(exit_distance))
+                    
+                    -- CRITICAL: After penetrating, we need to raycast AGAIN from the exit point
+                    -- to find targets beyond the wall
+                    local remaining_distance = max_distance - exit_distance
+                    if remaining_distance > 0.1 then
+                        log_to_console("[PHV] Hit[" .. index .. "] doing secondary raycast from exit point, remaining_dist=" .. tostring(remaining_distance))
+                        
+                        -- Raycast from exit point to find enemies beyond
+                        local HitScan = require("scripts/utilities/attack/hit_scan")
+                        local secondary_hits_dynamics = HitScan.raycast(physics_world, exit_pos, direction, remaining_distance, nil, "filter_player_character_shooting_raycast_dynamics", 0, optional_is_local_unit, optional_player, false)
+                        
+                        if secondary_hits_dynamics and #secondary_hits_dynamics > 0 then
+                            log_to_console("[PHV] Hit[" .. index .. "] secondary raycast found " .. #secondary_hits_dynamics .. " hits")
+                            
+                            -- Insert secondary hits into main hits array AFTER current position
+                            -- Insert in reverse order so they maintain correct order after insertion
+                            for i = #secondary_hits_dynamics, 1, -1 do
+                                local sec_hit = secondary_hits_dynamics[i]
+                                -- Adjust distance to be relative to original start position
+                                local original_dist = sec_hit.distance or sec_hit[2] or 0
+                                local adjusted_dist = exit_distance + original_dist
+                                
+                                -- Create a new hit table with adjusted distance
+                                local adjusted_hit = {}
+                                for k, v in pairs(sec_hit) do
+                                    adjusted_hit[k] = v
+                                end
+                                adjusted_hit.distance = adjusted_dist
+                                adjusted_hit[2] = adjusted_dist
+                                
+                                table.insert(hits, index + 1, adjusted_hit)
+                                log_to_console("[PHV] Hit[" .. index .. "] added secondary hit at adjusted dist=" .. tostring(adjusted_dist))
+                            end
+                            
+                            -- Update the total number of hits to process
+                            log_to_console("[PHV] Hit[" .. index .. "] total hits after insertion: " .. #hits)
+                        end
+                    end
+                    
+                    -- Check if we should destroy on exit
+                    if penetration_config.destroy_on_exit then
+                        log_to_console("[PHV] Hit[" .. index .. "] destroy_on_exit -> return false")
+                        return false
+                    end
+                    
+                    -- Continue to process hits beyond the exit point (including newly added secondary hits)
+                    goto continue
+                else
+                    log_to_console("[PHV] Hit[" .. index .. "] penetration failed, occluded")
+                end
+            end
+
+            -- If we couldn't penetrate, this is an occlusion
+            log_to_console("[PHV] Hit[" .. index .. "] environment occludes -> return false")
+            return false
+        end
+
+        ::continue::
+        index = index + 1
+    end
+
+    log_to_console("[PHV] process_hits_visibility finished no valid head hit found -> return false")
+    return false
+end
+
+-- Check if player can see enemy's head
+local function can_see_head(enemy_unit, camera_pos)
     local head_node = Unit.node(enemy_unit, "j_head")
-    if not head_node then return false end
+    if not head_node then
+        log_to_console("[can_see_head] No head node for unit: " .. tostring(enemy_unit))
+        return false
+    end
 
     local head_pos = Unit.world_position(enemy_unit, head_node)
     local dir = head_pos - camera_pos
     local dist = Vector3_length(dir)
-    Vector3_normalize(dir)
+    dir = Vector3_normalize(dir)
 
-    local hit, _, _, _, actor = PhysicsWorld.raycast(
-        World.physics_world(Application.main_world()),
-        camera_pos,
-        dir,
-        dist,
-        "closest",
-        "collision_filter",
-        "filter_ray_aim_assist_line_of_sight"
-    )
+    log_to_console("[Aimbot DEBUG] Checking visibility for unit: " .. tostring(enemy_unit) .. " head_pos=" .. tostring(head_pos.x) .. "," .. tostring(head_pos.y) .. "," .. tostring(head_pos.z) .. " dist=" .. tostring(dist))
 
-    return not hit or Actor.unit(actor) == enemy_unit
-end
-
-local function is_crosshair_on_enemy()
+    local physics_world = World.physics_world(Application.main_world())
     local player = Managers.player:local_player(1)
-    if not player or not player.player_unit then
+    local max_distance = dist
+
+    -- Determine hit_scan_template from weapon
+    local hit_scan_template = nil
+    do
+        local unit_data_extension = ScriptUnit.has_extension(player.player_unit, "unit_data_system") and ScriptUnit.extension(player.player_unit, "unit_data_system")
+        if unit_data_extension then
+            local weapon_action_component = unit_data_extension:read_component("weapon_action")
+            if weapon_action_component then
+                local WeaponTemplate = require("scripts/utilities/weapon/weapon_template")
+                local weapon_template = WeaponTemplate.current_weapon_template(weapon_action_component)
+
+                if weapon_template then
+                    -- Get current action settings (like FlamerGasEffects does)
+                    local Action = require("scripts/utilities/action/action")
+                    local action_settings = Action.current_action_settings_from_component(weapon_action_component, weapon_template.actions)
+                    
+                    -- Try to get fire_configuration
+                    local fire_config = nil
+                    if action_settings then
+                        fire_config = action_settings.fire_configuration or 
+                                    (action_settings.fire_configurations and action_settings.fire_configurations[1])
+                    end
+                    
+                    -- Fallback to checking specific actions if no current action
+                    if not fire_config and weapon_template.actions then
+                        fire_config = weapon_template.actions.action_shoot_hip or 
+                                    weapon_template.actions.action_shoot_hip_charged or 
+                                    weapon_template.actions.action_shoot_hip_start or 
+                                    weapon_template.actions.action_shoot_zoomed or 
+                                    weapon_template.actions.action_zoom_shoot_charged or 
+                                    weapon_template.actions.action_shoot_zoomed_start
+                        
+                        if fire_config then
+                            fire_config = fire_config.fire_configuration or 
+                                        (fire_config.fire_configurations and fire_config.fire_configurations[1])
+                        end
+                    end
+
+                    if fire_config and fire_config.hit_scan_template then
+                        hit_scan_template = fire_config.hit_scan_template
+                    elseif weapon_template.hit_scan_template then
+                        hit_scan_template = weapon_template.hit_scan_template
+                    end
+
+                    if hit_scan_template and hit_scan_template.range then
+                        max_distance = math.max(max_distance, hit_scan_template.range)
+                    end
+                end
+            end
+        end
+    end
+    
+    log_to_console("[can_see_head] hit_scan_template found: " .. tostring(hit_scan_template ~= nil))
+    log_to_console("[can_see_head] max_distance for raycast: " .. tostring(max_distance))
+    log_to_console("[can_see_head] target distance: " .. tostring(dist))
+
+    local HitScan = require("scripts/utilities/attack/hit_scan")
+    
+    -- FIRST: Do a raycast ONLY for dynamics (enemies) to see if target is reachable at all
+    -- This ignores walls and tells us if the enemy exists along this ray
+    local enemy_check_hits = HitScan.raycast(physics_world, camera_pos, dir, max_distance, nil, "filter_player_character_shooting_raycast_dynamics", 0, true, player, false)
+    
+    local target_found_in_ray = false
+    local target_distance_in_ray = math.huge
+    if enemy_check_hits then
+        for i = 1, #enemy_check_hits do
+            local hit = enemy_check_hits[i]
+            local actor = hit.actor or hit[4]
+            if actor then
+                local unit = Actor.unit(actor)
+                if unit == enemy_unit then
+                    target_found_in_ray = true
+                    target_distance_in_ray = hit.distance or hit[2] or math.huge
+                    log_to_console("[can_see_head] Target enemy found in direct ray at distance: " .. tostring(target_distance_in_ray))
+                    break
+                end
+            end
+        end
+    end
+    
+    if not target_found_in_ray then
+        log_to_console("[can_see_head] Target enemy NOT in direct ray - not visible")
+        return false
+    end
+    
+    -- SECOND: Now do the full raycast with statics to check for walls/occlusion
+    -- Do TWO raycasts and merge results:
+    -- 1. Dynamics (enemies, players)
+    local hits_dynamics = HitScan.raycast(physics_world, camera_pos, dir, max_distance, nil, "filter_player_character_shooting_raycast_dynamics", 0, true, player, false)
+    
+    -- 2. Statics (walls, floors, environment) - using "all" to get multiple hits like dynamics
+    local hits_statics = PhysicsWorld.raycast(physics_world, camera_pos, dir, max_distance, "all", "types", "statics", "max_hits", 256, "collision_filter", "filter_player_character_shooting_raycast_statics")
+    
+    -- Check if first wall/static is AFTER the target enemy
+    -- If so, the enemy is completely visible with no occlusion
+    local first_wall_distance = math.huge
+    if hits_statics and #hits_statics > 0 then
+        first_wall_distance = hits_statics[1].distance or hits_statics[1][2] or math.huge
+        log_to_console("[can_see_head] First wall at distance: " .. tostring(first_wall_distance))
+    end
+    
+    if target_distance_in_ray < first_wall_distance then
+        log_to_console("[can_see_head] Target is BEFORE first wall - completely visible!")
+        -- Do one final check to make sure we can actually see the head (not just afro/body)
+        -- by checking the enemy_check_hits for the target's head zone
+        for i = 1, #enemy_check_hits do
+            local hit = enemy_check_hits[i]
+            local actor = hit.actor or hit[4]
+            if actor then
+                local unit = Actor.unit(actor)
+                if unit == enemy_unit then
+                    local hit_zone = HitZone.get_name(unit, actor)
+                    log_to_console("[can_see_head] Direct hit zone: " .. tostring(hit_zone))
+                    if hit_zone == HitZone.hit_zone_names.head then
+                        return true
+                    end
+                end
+            end
+        end
+        log_to_console("[can_see_head] Target visible but no head hit found in direct ray")
+        return false
+    end
+    
+    log_to_console("[can_see_head] Target is BEHIND wall - checking penetration")
+    
+    log_to_console("[can_see_head] hits_dynamics count: " .. tostring(hits_dynamics and #hits_dynamics or 0))
+    if hits_dynamics then
+        for i = 1, math.min(#hits_dynamics, 10) do
+            local hit = hits_dynamics[i]
+            local dist = hit.distance or hit[2] or 0
+            local actor = hit.actor or hit[4]
+            local unit = actor and Actor.unit(actor)
+            local is_target = unit == enemy_unit
+            log_to_console("[can_see_head] dynamics[" .. i .. "] dist=" .. tostring(dist) .. " has_actor=" .. tostring(actor ~= nil) .. " is_target=" .. tostring(is_target))
+        end
+    end
+    
+    log_to_console("[can_see_head] hits_statics count: " .. tostring(hits_statics and #hits_statics or 0))
+    if hits_statics then
+        for i = 1, #hits_statics do
+            local hit = hits_statics[i]
+            local dist = hit.distance or hit[2] or 0
+            log_to_console("[can_see_head] statics[" .. i .. "] dist=" .. tostring(dist))
+        end
+    end
+    log_to_console("[can_see_head] hits_statics count: " .. tostring(hits_statics and #hits_statics or 0))
+    
+    -- Merge both hit arrays and deduplicate
+    local hits = {}
+    local seen_positions = {}
+    
+    if hits_dynamics then
+        for i = 1, #hits_dynamics do
+            local hit = hits_dynamics[i]
+            local pos = hit.position or hit[1]
+            local key = string.format("%.3f_%.3f_%.3f", pos.x, pos.y, pos.z)
+            if not seen_positions[key] then
+                hits[#hits + 1] = hit
+                seen_positions[key] = true
+            end
+        end
+    end
+    if hits_statics then
+        for i = 1, #hits_statics do
+            local hit = hits_statics[i]
+            local pos = hit.position or hit[1]
+            local key = string.format("%.3f_%.3f_%.3f", pos.x, pos.y, pos.z)
+            if not seen_positions[key] then
+                hits[#hits + 1] = hit
+                seen_positions[key] = true
+                log_to_console("[can_see_head] Added static hit " .. i .. " at distance: " .. tostring(hits_statics[i].distance or hits_statics[i][2]))
+            else
+                log_to_console("[can_see_head] Skipped duplicate static hit " .. i)
+            end
+        end
+    end
+
+    if not hits or #hits == 0 then
         return false
     end
 
+    -- Sort by distance
+    table.sort(hits, function(a, b)
+        local da = a.distance or a[2] or math.huge
+        local db = b.distance or b[2] or math.huge
+        return da < db
+    end)
+    
+    log_to_console("[can_see_head] After merge and sort, total hits: " .. #hits)
+    for i = 1, #hits do
+        local hit = hits[i]
+        local hit_dist = hit.distance or hit[2] or 0
+        local hit_actor = hit.actor or hit[4]
+        local has_actor = hit_actor ~= nil
+        log_to_console("[can_see_head] Merged hit[" .. i .. "] dist=" .. tostring(hit_dist) .. " has_actor=" .. tostring(has_actor))
+    end
+
+    return process_hits_visibility(false, World, physics_world, player.player_unit, hits, camera_pos, dir, max_distance, true, player, hit_scan_template, enemy_unit)
+end
+
+-- Check if crosshair is directly on an enemy (raycast from camera)
+local function is_crosshair_on_enemy()
+    local player = Managers.player:local_player(1)
+    if not player or not player.player_unit then
+        log_to_console("[Triggerbot] No player or player_unit")
+        return false
+    end
+
+    local unit_data_ext = ScriptUnit.extension(player.player_unit, "unit_data_system")
     local camera_pos = Managers.state.camera:camera_position(player.viewport_name)
     local camera_rot = Managers.state.camera:camera_rotation(player.viewport_name)
 
-    -- Apply recoil/sway
-    local unit_data_ext = ScriptUnit.extension(player.player_unit, "unit_data_system")
+    -- Apply recoil/sway to rotation (like the game does)
     local weapon_extension = ScriptUnit.extension(player.player_unit, "weapon_system")
     local recoil_template = weapon_extension:recoil_template()
     local sway_template = weapon_extension:sway_template()
@@ -209,67 +687,118 @@ local function is_crosshair_on_enemy()
     local recoil_component = unit_data_ext:read_component("recoil")
     local sway_component = unit_data_ext:read_component("sway")
 
+    local Recoil = require("scripts/utilities/recoil")
+    local Sway = require("scripts/utilities/sway")
+
     local ray_rotation = Recoil.apply_weapon_recoil_rotation(recoil_template, recoil_component, movement_state_component, camera_rot)
     ray_rotation = Sway.apply_sway_rotation(sway_template, sway_component, movement_state_component, ray_rotation)
 
     local direction = Quaternion.forward(ray_rotation)
 
+    local HitScan = require("scripts/utilities/attack/hit_scan")
     local physics_world = World.physics_world(Application.main_world())
-    local max_distance = 300 -- or weapon range
 
-    -- Collect statics (walls/environment)
-    local hits = PhysicsWorld.raycast(
-        physics_world,
-        camera_pos,
-        direction,
-        max_distance,
-        "all",
-        "types", "both",
-        "max_hits", 64,
-        "collision_filter", "filter_player_character_shooting_raycast"
-    )
+    local max_distance = 150
+    local hit_scan_template = nil
+    do
+        local unit_data_extension = ScriptUnit.has_extension(player.player_unit, "unit_data_system") and ScriptUnit.extension(player.player_unit, "unit_data_system")
+        if unit_data_extension then
+            local weapon_action_component = unit_data_extension:read_component("weapon_action")
+            if weapon_action_component then
+                local WeaponTemplate = require("scripts/utilities/weapon/weapon_template")
+                local weapon_template = WeaponTemplate.current_weapon_template(weapon_action_component)
+
+                if weapon_template then
+                    -- Get current action settings
+                    local Action = require("scripts/utilities/action/action")
+                    local action_settings = Action.current_action_settings_from_component(weapon_action_component, weapon_template.actions)
+                    
+                    -- Try to get fire_configuration
+                    local fire_config = nil
+                    if action_settings then
+                        fire_config = action_settings.fire_configuration or 
+                                    (action_settings.fire_configurations and action_settings.fire_configurations[1])
+                    end
+                    
+                    -- Fallback to checking specific actions if no current action
+                    if not fire_config and weapon_template.actions then
+                        fire_config = weapon_template.actions.action_shoot_hip or 
+                                    weapon_template.actions.action_shoot_hip_charged or 
+                                    weapon_template.actions.action_shoot_hip_start or 
+                                    weapon_template.actions.action_shoot_zoomed or 
+                                    weapon_template.actions.action_zoom_shoot_charged or 
+                                    weapon_template.actions.action_shoot_zoomed_start
+                        
+                        if fire_config then
+                            fire_config = fire_config.fire_configuration or 
+                                        (fire_config.fire_configurations and fire_config.fire_configurations[1])
+                        end
+                    end
+
+                    if fire_config and fire_config.hit_scan_template then
+                        hit_scan_template = fire_config.hit_scan_template
+                    elseif weapon_template.hit_scan_template then
+                        hit_scan_template = weapon_template.hit_scan_template
+                    end
+
+                    if hit_scan_template and hit_scan_template.range then
+                        max_distance = hit_scan_template.range
+                    end
+                end
+            end
+        end
+    end
+
+    -- Do TWO raycasts and merge results:
+    -- 1. Dynamics (enemies, players)
+    local hits_dynamics = HitScan.raycast(physics_world, camera_pos, direction, max_distance, nil, "filter_player_character_shooting_raycast_dynamics", 0, true, player, false)
+    -- 2. Statics (walls, floors, environment)
+    local hits_statics = PhysicsWorld.raycast(physics_world, camera_pos, direction, max_distance, "all", "types", "statics", "max_hits", 256, "collision_filter", "filter_player_character_shooting_raycast_statics")
+    
+    -- Merge both hit arrays
+    local hits = {}
+    if hits_dynamics then
+        for i = 1, #hits_dynamics do
+            hits[#hits + 1] = hits_dynamics[i]
+        end
+    end
+    if hits_statics then
+        for i = 1, #hits_statics do
+            hits[#hits + 1] = hits_statics[i]
+        end
+    end
 
     if not hits or #hits == 0 then
-		log_to_console("[Triggerbot] No hits.")
         return false
     end
 
-    -- Iterate hits in order
+    -- Sort by distance
+    table.sort(hits, function(a, b)
+        local da = a.distance or a[2] or math.huge
+        local db = b.distance or b[2] or math.huge
+        return da < db
+    end)
+
+    -- iterate and check each actor hit using process logic by setting target_unit to that unit when appropriate
+    local Breed = require("scripts/utilities/breed")
+
     for i = 1, #hits do
         local hit = hits[i]
         local actor = hit.actor or hit[4]
         if actor then
             local hit_unit = Actor.unit(actor)
 
-			log_to_console("[Triggerbot] Unit["..tostring(i).."] :" .. tostring(hit_unit))
-            -- Skip self
             if hit_unit and hit_unit ~= player.player_unit then
-                -- Check if enemy is alive
                 if ScriptUnit.has_extension(hit_unit, "health_system") then
                     local health_ext = ScriptUnit.extension(hit_unit, "health_system")
+
                     if health_ext and health_ext:is_alive() then
-						log_to_console("[Triggerbot] Unit["..tostring(i).."] :" .. tostring(hit_unit) .. " is alive")
                         local breed = Breed.unit_breed_or_nil(hit_unit)
+
                         if breed and not Breed.is_player(breed) and not (breed.name and breed.name:find("hazard")) then
-                            if (mod:get("triggerbot_respect_priority")) then
-                                local priority = get_breed_priority(breed.name, hit_unit)
-                                log_to_console("[Triggerbot] triggerbot_respect_priority on, checking priority: "..tostring(priority))
-                                if priority == 0 then
-                                    return false
-                                end
-                            end
-							log_to_console("[Triggerbot] Unit["..tostring(i).."] :" .. tostring(hit_unit) .. " is not a hazard or a player.")
-                            -- Resolve hit zone
-                            local zone = HitZone.get_name(hit_unit, actor)
-                            if zone == HitZone.hit_zone_names.head then
-								log_to_console("[Triggerbot] Unit["..tostring(i).."] :" .. tostring(hit_unit) .. " hit head.")
-								return can_visibly_see_target(hit_unit, camera_pos) --Check for walls
-                            elseif not mod:get("triggerbot_weakspot_only") then
-                                log_to_console("[Triggerbot] Unit["..tostring(i).."] :" .. tostring(hit_unit) .. " hit non-head weakspot only enabled.")
-                                if zone and zone ~= HitZone.hit_zone_names.afro then
-                                    log_to_console("[Triggerbot] Unit["..tostring(i).."] :" .. tostring(hit_unit) .. " hit something: "..tostring(zone))
-                                    return can_visibly_see_target(hit_unit, camera_pos) --Check for walls
-                                end
+                            -- Use process_hits_visibility but restrict to this hit_unit as target
+                            if process_hits_visibility(false, World, physics_world, player.player_unit, hits, camera_pos, direction, max_distance, true, player, hit_scan_template, hit_unit) then
+                                return true
                             end
                         end
                     end
@@ -277,12 +806,9 @@ local function is_crosshair_on_enemy()
             end
         end
     end
-	
-	log_to_console("[Triggerbot] Nothing hit.")
 
     return false
 end
-
 
 -- Look at an enemy's head with recoil compensation
 local function look_at_enemy_head(enemy_unit, player, camera_pos, recoil_pitch, recoil_yaw)
@@ -336,7 +862,7 @@ local function auto_aim_priority_targets(player_unit)
         local enemy = enemies[i]
         
         if not fov_check_enabled or is_in_fov(enemy.unit, camera_pos, camera_forward, min_dot) then
-            if can_visibly_see_target(enemy.unit, camera_pos) then
+            if can_see_head(enemy.unit, camera_pos) then
                 look_at_enemy_head(enemy.unit, player, camera_pos, recoil_pitch, recoil_yaw)
                 has_target = true
 				log_to_console("[Aimbot] Found target.")
@@ -346,6 +872,7 @@ local function auto_aim_priority_targets(player_unit)
     end
     
 	log_to_console("[Aimbot] No target.")
+    has_target = false
 end
 
 mod.toggle_aim = function(is_pressed)
@@ -420,6 +947,7 @@ local function get_current_weapon_info()
     local alternate_fire_component = unit_data_ext:read_component("alternate_fire")
     local is_ads = alternate_fire_component and alternate_fire_component.is_active or false
     
+    local WeaponTemplate = require("scripts/utilities/weapon/weapon_template")
     local weapon_template = WeaponTemplate.current_weapon_template(weapon_action_component)
     
     if not weapon_template then
@@ -503,7 +1031,6 @@ mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, u
     local should_aim = (use_mouse2 and Mouse.button(Mouse.button_index("right")) > 0.5) or 
                       (not use_mouse2 and aim_button_pressed)
     
-    has_target = false
     if should_aim then
         auto_aim_priority_targets(unit)
     end
