@@ -140,7 +140,8 @@ local function get_all_enemies()
                         enemies[n] = {
                             unit = unit,
                             position = POSITION_LOOKUP[unit],
-                            priority = priority
+                            priority = priority,
+							breed_name = breed.name
                         }
                     end
                 end
@@ -310,6 +311,7 @@ local function auto_aim_priority_targets(player_unit)
     end
     
     local camera_pos = Managers.state.camera:camera_position(player.viewport_name)
+    local player_pos = POSITION_LOOKUP[player_unit]
     
     -- Get recoil offset
     local unit_data_ext = ScriptUnit.extension(player_unit, "unit_data_system")
@@ -319,6 +321,7 @@ local function auto_aim_priority_targets(player_unit)
     
     -- Get settings
     local fov_check_enabled = mod:get("enable_fov_check")
+    local melee_priority = mod:get("melee_priority")
     
     -- Pre-calculate FoV values if needed
     local camera_forward, min_dot
@@ -329,9 +332,34 @@ local function auto_aim_priority_targets(player_unit)
         min_dot = math_cos(math_rad(fov_angle * 0.5))
     end
     
-    -- Find and aim at priority targets
     local enemies = get_all_enemies()
-	log_to_console("[Aimbot] Begin finding enemy")
+    
+    -- Check if there is a rager or a mauler within 4 meters
+    if melee_priority and #enemies > 0 and player_pos then
+        local MELEE_DIST_SQ = 16
+        
+        for i = 1, #enemies do
+            local enemy = enemies[i]
+            if enemy.breed_name == "cultist_berzerker" or 
+               enemy.breed_name == "renegade_berzerker" or 
+               enemy.breed_name == "renegade_executor" then
+                
+                local dist_sq = Vector3.distance_squared(player_pos, enemy.position)
+                
+                if dist_sq <= MELEE_DIST_SQ then
+                    if can_visibly_see_target(enemy.unit, camera_pos) then
+                        look_at_enemy_head(enemy.unit, player, camera_pos, recoil_pitch, recoil_yaw)
+                        has_target = true
+                        log_to_console("[Aimbot] Panic Override trigger on: " .. tostring(enemy.breed_name))
+                        return
+                    end
+                end
+            end
+        end
+    end
+
+    -- Find and aim at priority targets
+    log_to_console("[Aimbot] Begin finding enemy")
     for i = 1, #enemies do
         local enemy = enemies[i]
         
@@ -339,13 +367,13 @@ local function auto_aim_priority_targets(player_unit)
             if can_visibly_see_target(enemy.unit, camera_pos) then
                 look_at_enemy_head(enemy.unit, player, camera_pos, recoil_pitch, recoil_yaw)
                 has_target = true
-				log_to_console("[Aimbot] Found target.")
+                log_to_console("[Aimbot] Found target.")
                 return
             end
         end
     end
     
-	log_to_console("[Aimbot] No target.")
+    log_to_console("[Aimbot] No target.")
 end
 
 mod.toggle_aim = function(is_pressed)

@@ -72,6 +72,11 @@ return {
                         type = "checkbox",
                         default_value = true
                     },
+					{
+                        setting_id = "melee_priority",
+                        type = "checkbox",
+                        default_value = true
+                    },
                     {
                         setting_id = "use_custom_aim_key",
                         type = "keybind",
