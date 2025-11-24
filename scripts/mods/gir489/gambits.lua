@@ -10,6 +10,7 @@ local DAEMONHOST_PASSIVE_STAGE = 1
 local aim_button_pressed = false
 local triggerbot_pressed = false
 local has_target = false
+local locked_target_unit = nil  -- Locked target to prevent oscillation
 
 -- Cache frequently accessed values
 local math_rad = math.rad
@@ -21,11 +22,15 @@ local Vector3_dot = Vector3.dot
 local Vector3_length = Vector3.length
 
 local log_debug = true
+local log_phv = true  -- Enable process_hits_visibility debug logs for debugging
 
 function log_to_console(message)
     local dmf = get_mod("DMF")
     if log_debug and dmf:get("show_developer_console") then
-        print(message)
+        -- Filter out PHV logs if disabled
+        if log_phv or not message:find("%[PHV%]") then
+            print(message)
+        end
     end
 end
 
@@ -187,6 +192,7 @@ local HitScan = require("scripts/utilities/attack/hit_scan")
 local Sprint = require("scripts/extension_systems/character_state_machine/character_states/utilities/sprint")
 
 -- Helper: process hits similar to HitScan.process_hits but without side effects
+-- Returns: "visible" if target is directly visible, "penetrable" if target is behind wall but reachable, false otherwise
 local function process_hits_visibility(is_server, world, physics_world, attacker_unit, hits, position, direction, max_distance, optional_is_local_unit, optional_player, hit_scan_template, target_unit)
     if not hits then
         return false
@@ -201,7 +207,7 @@ local function process_hits_visibility(is_server, world, physics_world, attacker
     local impact_config = damage_config and damage_config.impact
     local penetration_config = damage_config and damage_config.penetration
     local damage_profile = damage_config and impact_config and impact_config.damage_profile
-    
+
     -- If no penetration config exists, create a default one for visibility checks
     -- This allows the aimbot to see through thin walls even if the weapon doesn't penetrate
     if not penetration_config then
@@ -228,6 +234,7 @@ local function process_hits_visibility(is_server, world, physics_world, attacker
     local exit_distance = 0
     local penetrated = false
     local try_penetration = penetration_config ~= nil  -- Now always true with default config
+    local target_found_directly = false  -- Track if target is directly visible (no penetration needed)
 
     -- iterate in distance order - use while loop so we can process newly added hits
     local index = 1
@@ -262,7 +269,7 @@ local function process_hits_visibility(is_server, world, physics_world, attacker
             local target_is_hazard_prop, hazard_prop_is_active = HazardProp.status(hit_unit)
 
             log_to_console("[PHV] Hit[" .. index .. "] zone=" .. tostring(hit_zone_name) .. " breed=" .. tostring(target_breed_or_nil and target_breed_or_nil.name) .. " damagable=" .. tostring(is_damagable) .. " hazard_prop=" .. tostring(target_is_hazard_prop))
-            
+
             -- Check if this is actually a static/environment hit (has actor but not damagable and no breed)
             -- This happens when walls/environment have actors attached
             if not is_damagable and not target_breed_or_nil and not target_is_hazard_prop then
@@ -321,13 +328,16 @@ local function process_hits_visibility(is_server, world, physics_world, attacker
                         return false
                     end
                     if hit_zone_name == HitZone.hit_zone_names.head then
-                        log_to_console("[PHV] Hit[" .. index .. "] head hit on target -> return true")
-                        return true
+                        log_to_console("[PHV] Hit[" .. index .. "] head hit on target -> return visible")
+                        target_found_directly = true  -- Mark as directly visible
+                        return "visible"
                     end
 
-                    -- hit other zone on same unit -> occluded for head
-                    log_to_console("[PHV] Hit[" .. index .. "] hit non-head on target -> return false")
-                    return false
+                    -- hit other zone on same unit: skip this and continue looking
+                    -- The target might be behind a penetrable wall and appear again in secondary raycast
+                    log_to_console("[PHV] Hit[" .. index .. "] hit non-head zone on target, but continuing to check for penetration")
+                    HIT_UNITS[hit_unit] = true
+                    goto continue
                 end
 
                 -- Only do hit mass checks for non-target units
@@ -445,27 +455,34 @@ local function process_hits_visibility(is_server, world, physics_world, attacker
         index = index + 1
     end
 
+    -- If we got here without returning, check if we found the target through penetration
+    if HIT_UNITS[target_unit] and not target_found_directly then
+        log_to_console("[PHV] process_hits_visibility finished target found through penetration -> return penetrable")
+        return "penetrable"
+    end
+
     log_to_console("[PHV] process_hits_visibility finished no valid head hit found -> return false")
     return false
 end
 
 -- Check if player can see enemy's head
-local function can_see_head(enemy_unit, camera_pos)
+local function can_see_head(enemy_unit, player)
     local head_node = Unit.node(enemy_unit, "j_head")
     if not head_node then
-        log_to_console("[can_see_head] No head node for unit: " .. tostring(enemy_unit))
         return false
     end
 
+    -- Use first person component position for raycasting (where weapon actually fires from)
+    local unit_data_ext = ScriptUnit.extension(player.player_unit, "unit_data_system")
+    local first_person_component = unit_data_ext:read_component("first_person")
+    local shooting_pos = first_person_component.position
+
     local head_pos = Unit.world_position(enemy_unit, head_node)
-    local dir = head_pos - camera_pos
+    local dir = head_pos - shooting_pos
     local dist = Vector3_length(dir)
     dir = Vector3_normalize(dir)
 
-    log_to_console("[Aimbot DEBUG] Checking visibility for unit: " .. tostring(enemy_unit) .. " head_pos=" .. tostring(head_pos.x) .. "," .. tostring(head_pos.y) .. "," .. tostring(head_pos.z) .. " dist=" .. tostring(dist))
-
     local physics_world = World.physics_world(Application.main_world())
-    local player = Managers.player:local_player(1)
     local max_distance = dist
 
     -- Determine hit_scan_template from weapon
@@ -482,25 +499,25 @@ local function can_see_head(enemy_unit, camera_pos)
                     -- Get current action settings (like FlamerGasEffects does)
                     local Action = require("scripts/utilities/action/action")
                     local action_settings = Action.current_action_settings_from_component(weapon_action_component, weapon_template.actions)
-                    
+
                     -- Try to get fire_configuration
                     local fire_config = nil
                     if action_settings then
-                        fire_config = action_settings.fire_configuration or 
+                        fire_config = action_settings.fire_configuration or
                                     (action_settings.fire_configurations and action_settings.fire_configurations[1])
                     end
-                    
+
                     -- Fallback to checking specific actions if no current action
                     if not fire_config and weapon_template.actions then
-                        fire_config = weapon_template.actions.action_shoot_hip or 
-                                    weapon_template.actions.action_shoot_hip_charged or 
-                                    weapon_template.actions.action_shoot_hip_start or 
-                                    weapon_template.actions.action_shoot_zoomed or 
-                                    weapon_template.actions.action_zoom_shoot_charged or 
+                        fire_config = weapon_template.actions.action_shoot_hip or
+                                    weapon_template.actions.action_shoot_hip_charged or
+                                    weapon_template.actions.action_shoot_hip_start or
+                                    weapon_template.actions.action_shoot_zoomed or
+                                    weapon_template.actions.action_zoom_shoot_charged or
                                     weapon_template.actions.action_shoot_zoomed_start
-                        
+
                         if fire_config then
-                            fire_config = fire_config.fire_configuration or 
+                            fire_config = fire_config.fire_configuration or
                                         (fire_config.fire_configurations and fire_config.fire_configurations[1])
                         end
                     end
@@ -518,160 +535,123 @@ local function can_see_head(enemy_unit, camera_pos)
             end
         end
     end
-    
-    log_to_console("[can_see_head] hit_scan_template found: " .. tostring(hit_scan_template ~= nil))
-    log_to_console("[can_see_head] max_distance for raycast: " .. tostring(max_distance))
-    log_to_console("[can_see_head] target distance: " .. tostring(dist))
 
     local HitScan = require("scripts/utilities/attack/hit_scan")
-    
-    -- FIRST: Do a raycast ONLY for dynamics (enemies) to see if target is reachable at all
-    -- This ignores walls and tells us if the enemy exists along this ray
-    local enemy_check_hits = HitScan.raycast(physics_world, camera_pos, dir, max_distance, nil, "filter_player_character_shooting_raycast_dynamics", 0, true, player, false)
-    
-    local target_found_in_ray = false
-    local target_distance_in_ray = math.huge
-    if enemy_check_hits then
-        for i = 1, #enemy_check_hits do
-            local hit = enemy_check_hits[i]
-            local actor = hit.actor or hit[4]
-            if actor then
-                local unit = Actor.unit(actor)
-                if unit == enemy_unit then
-                    target_found_in_ray = true
-                    target_distance_in_ray = hit.distance or hit[2] or math.huge
-                    log_to_console("[can_see_head] Target enemy found in direct ray at distance: " .. tostring(target_distance_in_ray))
-                    break
-                end
-            end
-        end
-    end
-    
-    if not target_found_in_ray then
-        log_to_console("[can_see_head] Target enemy NOT in direct ray - not visible")
-        return false
-    end
-    
-    -- SECOND: Now do the full raycast with statics to check for walls/occlusion
+
     -- Do TWO raycasts and merge results:
     -- 1. Dynamics (enemies, players)
-    local hits_dynamics = HitScan.raycast(physics_world, camera_pos, dir, max_distance, nil, "filter_player_character_shooting_raycast_dynamics", 0, true, player, false)
-    
-    -- 2. Statics (walls, floors, environment) - using "all" to get multiple hits like dynamics
-    local hits_statics = PhysicsWorld.raycast(physics_world, camera_pos, dir, max_distance, "all", "types", "statics", "max_hits", 256, "collision_filter", "filter_player_character_shooting_raycast_statics")
-    
-    -- Check if first wall/static is AFTER the target enemy
-    -- If so, the enemy is completely visible with no occlusion
-    local first_wall_distance = math.huge
-    if hits_statics and #hits_statics > 0 then
-        first_wall_distance = hits_statics[1].distance or hits_statics[1][2] or math.huge
-        log_to_console("[can_see_head] First wall at distance: " .. tostring(first_wall_distance))
-    end
-    
-    if target_distance_in_ray < first_wall_distance then
-        log_to_console("[can_see_head] Target is BEFORE first wall - completely visible!")
-        -- Do one final check to make sure we can actually see the head (not just afro/body)
-        -- by checking the enemy_check_hits for the target's head zone
-        for i = 1, #enemy_check_hits do
-            local hit = enemy_check_hits[i]
-            local actor = hit.actor or hit[4]
-            if actor then
-                local unit = Actor.unit(actor)
-                if unit == enemy_unit then
-                    local hit_zone = HitZone.get_name(unit, actor)
-                    log_to_console("[can_see_head] Direct hit zone: " .. tostring(hit_zone))
-                    if hit_zone == HitZone.hit_zone_names.head then
-                        return true
-                    end
-                end
-            end
-        end
-        log_to_console("[can_see_head] Target visible but no head hit found in direct ray")
-        return false
-    end
-    
-    log_to_console("[can_see_head] Target is BEHIND wall - checking penetration")
-    
-    log_to_console("[can_see_head] hits_dynamics count: " .. tostring(hits_dynamics and #hits_dynamics or 0))
-    if hits_dynamics then
-        for i = 1, math.min(#hits_dynamics, 10) do
-            local hit = hits_dynamics[i]
-            local dist = hit.distance or hit[2] or 0
-            local actor = hit.actor or hit[4]
-            local unit = actor and Actor.unit(actor)
-            local is_target = unit == enemy_unit
-            log_to_console("[can_see_head] dynamics[" .. i .. "] dist=" .. tostring(dist) .. " has_actor=" .. tostring(actor ~= nil) .. " is_target=" .. tostring(is_target))
-        end
-    end
-    
-    log_to_console("[can_see_head] hits_statics count: " .. tostring(hits_statics and #hits_statics or 0))
-    if hits_statics then
-        for i = 1, #hits_statics do
-            local hit = hits_statics[i]
-            local dist = hit.distance or hit[2] or 0
-            log_to_console("[can_see_head] statics[" .. i .. "] dist=" .. tostring(dist))
-        end
-    end
-    log_to_console("[can_see_head] hits_statics count: " .. tostring(hits_statics and #hits_statics or 0))
-    
-    -- Merge both hit arrays and deduplicate
-    local hits = {}
-    local seen_positions = {}
-    
+    local hits_dynamics = HitScan.raycast(physics_world, shooting_pos, dir, max_distance, nil, "filter_player_character_shooting_raycast_dynamics", 0, true, player, false)
+
+    log_to_console("[HEAD] Raycast from " .. tostring(shooting_pos) .. " to head, direction=" .. tostring(dir) .. ", max_dist=" .. tostring(max_distance))
+    log_to_console("[HEAD] Total hits from dynamics raycast: " .. tostring(hits_dynamics and #hits_dynamics or 0))
+
+    -- Check all hits for the target and look for a head hit
+    local target_found = false
+    local target_zone_name = nil
+    local head_distance = math.huge
+
     if hits_dynamics then
         for i = 1, #hits_dynamics do
             local hit = hits_dynamics[i]
-            local pos = hit.position or hit[1]
-            local key = string.format("%.3f_%.3f_%.3f", pos.x, pos.y, pos.z)
-            if not seen_positions[key] then
-                hits[#hits + 1] = hit
-                seen_positions[key] = true
-            end
-        end
-    end
-    if hits_statics then
-        for i = 1, #hits_statics do
-            local hit = hits_statics[i]
-            local pos = hit.position or hit[1]
-            local key = string.format("%.3f_%.3f_%.3f", pos.x, pos.y, pos.z)
-            if not seen_positions[key] then
-                hits[#hits + 1] = hit
-                seen_positions[key] = true
-                log_to_console("[can_see_head] Added static hit " .. i .. " at distance: " .. tostring(hits_statics[i].distance or hits_statics[i][2]))
-            else
-                log_to_console("[can_see_head] Skipped duplicate static hit " .. i)
+            local actor = hit.actor or hit[4]
+            local hit_dist = hit.distance or hit[2] or 0
+            if actor then
+                local unit = Actor.unit(actor)
+                if unit == enemy_unit then
+                    -- Found a hit on the target
+                    local zone_name = HitZone.get_name(unit, actor)
+                    log_to_console("[HEAD] Hit[" .. i .. "] distance=" .. tostring(hit_dist) .. " on target, zone=" .. tostring(zone_name))
+
+                    target_found = true
+
+                    -- Shield blocks targeting completely
+                    if zone_name == HitZone.hit_zone_names.shield then
+                        log_to_console("[HEAD] Target has shield -> NOT VISIBLE")
+                        return false
+                    end
+
+                    -- If it's a head hit, record the distance
+                    if zone_name == HitZone.hit_zone_names.head then
+                        head_distance = hit_dist
+                        log_to_console("[HEAD] Head hit found at distance " .. tostring(head_distance))
+                    end
+
+                    -- Record the first non-head zone we hit (for logging)
+                    if not target_zone_name then
+                        target_zone_name = zone_name
+                    end
+                    -- Continue iterating to find a head hit
+                end
             end
         end
     end
 
-    if not hits or #hits == 0 then
+    if not target_found then
+        log_to_console("[HEAD] Target not found in raycast at all")
         return false
     end
 
-    -- Sort by distance
-    table.sort(hits, function(a, b)
-        local da = a.distance or a[2] or math.huge
-        local db = b.distance or b[2] or math.huge
-        return da < db
-    end)
-    
-    log_to_console("[can_see_head] After merge and sort, total hits: " .. #hits)
-    for i = 1, #hits do
-        local hit = hits[i]
-        local hit_dist = hit.distance or hit[2] or 0
-        local hit_actor = hit.actor or hit[4]
-        local has_actor = hit_actor ~= nil
-        log_to_console("[can_see_head] Merged hit[" .. i .. "] dist=" .. tostring(hit_dist) .. " has_actor=" .. tostring(has_actor))
+    if head_distance == math.huge then
+        log_to_console("[HEAD] No head hit found (first hit was " .. tostring(target_zone_name) .. "), target not visible")
+        return false
     end
 
-    return process_hits_visibility(false, World, physics_world, player.player_unit, hits, camera_pos, dir, max_distance, true, player, hit_scan_template, enemy_unit)
+    -- 2. Statics (walls, floors, environment) - check if wall is blocking the head
+    local hits_statics = PhysicsWorld.raycast(physics_world, shooting_pos, dir, max_distance, "all", "types", "statics", "max_hits", 256, "collision_filter", "filter_player_character_shooting_raycast_statics")
+
+    -- Check if the first wall is closer than the head
+    local first_wall_distance = math.huge
+    local first_wall_position = nil
+    if hits_statics and #hits_statics > 0 then
+        first_wall_distance = hits_statics[1].distance or hits_statics[1][2] or math.huge
+        first_wall_position = hits_statics[1].position or hits_statics[1][1]
+        log_to_console("[HEAD] First wall at distance " .. tostring(first_wall_distance) .. ", head at distance " .. tostring(head_distance))
+    end
+
+    -- If head is closer than any wall, it's visible
+    if head_distance < first_wall_distance then
+        log_to_console("[HEAD] Head is closer than wall -> VISIBLE")
+        return "visible"
+    end
+
+    -- Head is blocked by wall, try penetration
+    log_to_console("[HEAD] Wall is blocking head, attempting penetration...")
+    local ObjectPenetration = require("scripts/utilities/attack/object_penetration")
+
+    -- Get penetration depth from weapon template
+    local penetration_depth = 0.75  -- default fallback
+    if hit_scan_template and hit_scan_template.damage and hit_scan_template.damage.penetration then
+        penetration_depth = hit_scan_template.damage.penetration.depth or 0.75
+    end
+
+    -- Try to penetrate through the wall
+    local exit_pos, exit_normal, exit_unit = ObjectPenetration.test_for_penetration(physics_world, first_wall_position, dir, penetration_depth)
+
+    if not exit_pos then
+        log_to_console("[HEAD] Penetration failed -> NOT VISIBLE")
+        return false
+    end
+
+    -- Penetration succeeded, check if head is beyond the wall
+    local object_thickness = Vector3_length(exit_pos - first_wall_position)
+    local exit_distance = first_wall_distance + object_thickness
+
+    log_to_console("[HEAD] Penetrated wall, thickness=" .. tostring(object_thickness) .. ", exit_distance=" .. tostring(exit_distance) .. ", head_distance=" .. tostring(head_distance))
+
+    if head_distance > exit_distance then
+        -- Head is beyond the penetrated wall
+        log_to_console("[HEAD] Head is beyond wall exit -> PENETRABLE")
+        return "penetrable"
+    else
+        log_to_console("[HEAD] Head is still in wall thickness -> NOT VISIBLE")
+        return false
+    end
 end
 
 -- Check if crosshair is directly on an enemy (raycast from camera)
 local function is_crosshair_on_enemy()
     local player = Managers.player:local_player(1)
     if not player or not player.player_unit then
-        log_to_console("[Triggerbot] No player or player_unit")
         return false
     end
 
@@ -797,7 +777,8 @@ local function is_crosshair_on_enemy()
 
                         if breed and not Breed.is_player(breed) and not (breed.name and breed.name:find("hazard")) then
                             -- Use process_hits_visibility but restrict to this hit_unit as target
-                            if process_hits_visibility(false, World, physics_world, player.player_unit, hits, camera_pos, direction, max_distance, true, player, hit_scan_template, hit_unit) then
+                            local visibility = process_hits_visibility(false, World, physics_world, player.player_unit, hits, camera_pos, direction, max_distance, true, player, hit_scan_template, hit_unit)
+                            if visibility then  -- true for "visible" or "penetrable"
                                 return true
                             end
                         end
@@ -816,15 +797,15 @@ local function look_at_enemy_head(enemy_unit, player, camera_pos, recoil_pitch, 
     if not head_node then
         return false
     end
-    
+
     local head_pos = Unit.world_position(enemy_unit, head_node)
     local dir = Vector3_normalize(head_pos - camera_pos)
-    
+
     local target_yaw = math_atan2(dir.y, dir.x) - HALF_PI
     local target_pitch = math_asin(dir.z)
-    
+
     player:set_orientation(target_yaw - recoil_yaw, target_pitch - recoil_pitch, 0)
-    
+
     return true
 end
 
@@ -834,18 +815,18 @@ local function auto_aim_priority_targets(player_unit)
     if not player or not player.player_unit then
         return
     end
-    
+
     local camera_pos = Managers.state.camera:camera_position(player.viewport_name)
-    
+
     -- Get recoil offset
     local unit_data_ext = ScriptUnit.extension(player_unit, "unit_data_system")
     local recoil_component = unit_data_ext:read_component("recoil")
     local recoil_pitch = recoil_component.pitch_offset
     local recoil_yaw = recoil_component.yaw_offset
-    
+
     -- Get settings
     local fov_check_enabled = mod:get("enable_fov_check")
-    
+
     -- Pre-calculate FoV values if needed
     local camera_forward, min_dot
     if fov_check_enabled then
@@ -854,24 +835,51 @@ local function auto_aim_priority_targets(player_unit)
         local fov_angle = mod:get("fov_angle")
         min_dot = math_cos(math_rad(fov_angle * 0.5))
     end
-    
+
     -- Find and aim at priority targets
     local enemies = get_all_enemies()
-	log_to_console("[Aimbot] Begin finding enemy")
+
+    -- Filter out enemies with priority 0 and sort by priority (highest first: 9 -> 1)
+    local valid_enemies = {}
     for i = 1, #enemies do
-        local enemy = enemies[i]
-        
+        if enemies[i].priority > 0 then
+            table.insert(valid_enemies, enemies[i])
+        end
+    end
+
+    -- Sort by priority descending (9 -> 1)
+    table.sort(valid_enemies, function(a, b)
+        return a.priority > b.priority
+    end)
+
+    -- Iterate through sorted priority list and find first visible or penetrable target
+    local target_to_aim = nil
+    for i = 1, #valid_enemies do
+        local enemy = valid_enemies[i]
+
         if not fov_check_enabled or is_in_fov(enemy.unit, camera_pos, camera_forward, min_dot) then
-            if can_see_head(enemy.unit, camera_pos) then
-                look_at_enemy_head(enemy.unit, player, camera_pos, recoil_pitch, recoil_yaw)
-                has_target = true
-				log_to_console("[Aimbot] Found target.")
-                return
+            local visibility = can_see_head(enemy.unit, player)
+            log_to_console("[AIM] Checking priority " .. enemy.priority .. " enemy, visibility=" .. tostring(visibility))
+
+            -- First target that's either visible or penetrable - use it
+            if visibility == "visible" or visibility == "penetrable" then
+                target_to_aim = enemy.unit
+                log_to_console("[AIM] Selected target with priority " .. enemy.priority .. " visibility=" .. tostring(visibility))
+                break
             end
         end
     end
-    
-	log_to_console("[Aimbot] No target.")
+
+    if target_to_aim then
+        locked_target_unit = target_to_aim
+        look_at_enemy_head(target_to_aim, player, camera_pos, recoil_pitch, recoil_yaw)
+        has_target = true
+        return
+    end
+
+    -- No targets found
+    log_to_console("[AIM] No targets found.")
+    locked_target_unit = nil
     has_target = false
 end
 
