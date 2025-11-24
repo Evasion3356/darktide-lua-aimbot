@@ -366,6 +366,10 @@ local function is_crosshair_on_enemy()
                         if zone_name == HitZone.hit_zone_names.afro then
                             goto continue_hit_loop
                         end
+                        
+                        if zone_name == HitZone.hit_zone_names.shield then
+                            return false
+                        end
 
                         if weakspot_only then
                             if zone_name ~= HitZone.hit_zone_names.head and zone_name ~= HitZone.hit_zone_names.weakspot then
