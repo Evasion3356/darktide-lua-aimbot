@@ -1041,5 +1041,7 @@ mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, u
     
     if should_aim then
         auto_aim_priority_targets(unit)
+    else
+        has_target = false
     end
 end)
