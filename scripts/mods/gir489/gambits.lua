@@ -108,20 +108,18 @@ local function get_all_enemies()
     for unit, _ in pairs(entities) do
         if ScriptUnit_has_extension(unit, "health_system") then
             local health_ext = ScriptUnit_extension(unit, "health_system")
-            if health_ext:is_alive() then
-                if ScriptUnit_has_extension(unit, "unit_data_system") then
-                    local unit_data_ext = ScriptUnit_extension(unit, "unit_data_system")
-                    local breed = unit_data_ext:breed()
-                    if breed and breed.breed_type ~= "player" and not breed.name:find("hazard") then
-                        local priority = get_breed_priority(breed.name, unit)
-                        if priority > 0 then
-                            n = n + 1
-                            enemies[n] = {
-                                unit = unit,
-                                position = POSITION_LOOKUP[unit],
-                                priority = priority
-                            }
-                        end
+            if health_ext:is_alive() and ScriptUnit_has_extension(unit, "unit_data_system") then
+                local unit_data_ext = ScriptUnit_extension(unit, "unit_data_system")
+                local breed = unit_data_ext:breed()
+                if breed and breed.breed_type ~= "player" and not breed.name:find("hazard") then
+                    local priority = get_breed_priority(breed.name, unit)
+                    if priority > 0 then
+                        n = n + 1
+                        enemies[n] = {
+                            unit = unit,
+                            position = POSITION_LOOKUP[unit],
+                            priority = priority
+                        }
                     end
                 end
             end
@@ -194,7 +192,7 @@ local function can_see_head(enemy_unit, player)
         end
     end
 
-    return "visible"
+    return true
 end
 
 local function look_at_enemy_head(enemy_unit, player, camera_pos, recoil_pitch, recoil_yaw)
@@ -229,7 +227,7 @@ local function auto_aim_priority_targets(player_unit)
     for i = 1, #enemies do
         local enemy = enemies[i]
         if not fov_check_enabled or is_in_fov(enemy.unit, camera_pos, camera_forward, min_dot) then
-            if can_see_head(enemy.unit, player) == "visible" then
+            if can_see_head(enemy.unit, player) then
                 has_target = true
                 look_at_enemy_head(enemy.unit, player, camera_pos, recoil_component.pitch_offset, recoil_component.yaw_offset)
                 return
