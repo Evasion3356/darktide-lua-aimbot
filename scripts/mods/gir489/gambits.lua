@@ -2,6 +2,9 @@ local mod = get_mod("darktide-lua-aimbot")
 local HitZone = require("scripts/utilities/attack/hit_zone")
 local Breed = require("scripts/utilities/breed")
 local HitScan = require("scripts/utilities/attack/hit_scan")
+local WeaponTemplate = require("scripts/utilities/weapon/weapon_template")
+local Recoil = require("scripts/utilities/recoil")
+local Sway = require("scripts/utilities/sway")
 
 local HALF_PI = math.pi / 2
 local DAEMONHOST_PASSIVE_STAGE = 1
@@ -14,9 +17,12 @@ local math_rad = math.rad
 local math_cos = math.cos
 local math_atan2 = math.atan2
 local math_asin = math.asin
+local math_huge = math.huge
 local Vector3_normalize = Vector3.normalize
 local Vector3_dot = Vector3.dot
 local Vector3_length = Vector3.length
+local ScriptUnit_has_extension = ScriptUnit.has_extension
+local ScriptUnit_extension = ScriptUnit.extension
 
 local function get_breed_priority(breed_name, unit)
     local priority_map = {
@@ -96,26 +102,26 @@ local function get_all_enemies()
         end
     end
 
-    local ScriptUnit_has_extension = ScriptUnit.has_extension
-    local ScriptUnit_extension = ScriptUnit.extension
     local enemies = {}
     local n = 0
 
     for unit, _ in pairs(entities) do
-        local health_ext = ScriptUnit_has_extension(unit, "health_system") and ScriptUnit_extension(unit, "health_system")
-        if health_ext and health_ext:is_alive() then
-            local unit_data_ext = ScriptUnit_has_extension(unit, "unit_data_system") and ScriptUnit_extension(unit, "unit_data_system")
-            if unit_data_ext then
-                local breed = unit_data_ext:breed()
-                if breed and breed.breed_type ~= "player" and not breed.name:find("hazard") then
-                    local priority = get_breed_priority(breed.name, unit)
-                    if priority > 0 then
-                        n = n + 1
-                        enemies[n] = {
-                            unit = unit,
-                            position = POSITION_LOOKUP[unit],
-                            priority = priority
-                        }
+        if ScriptUnit_has_extension(unit, "health_system") then
+            local health_ext = ScriptUnit_extension(unit, "health_system")
+            if health_ext:is_alive() then
+                if ScriptUnit_has_extension(unit, "unit_data_system") then
+                    local unit_data_ext = ScriptUnit_extension(unit, "unit_data_system")
+                    local breed = unit_data_ext:breed()
+                    if breed and breed.breed_type ~= "player" and not breed.name:find("hazard") then
+                        local priority = get_breed_priority(breed.name, unit)
+                        if priority > 0 then
+                            n = n + 1
+                            enemies[n] = {
+                                unit = unit,
+                                position = POSITION_LOOKUP[unit],
+                                priority = priority
+                            }
+                        end
                     end
                 end
             end
@@ -138,21 +144,19 @@ local function is_in_fov(enemy_unit, camera_pos, camera_forward, min_dot)
     return Vector3_dot(camera_forward, Vector3_normalize(head_pos - camera_pos)) >= min_dot
 end
 
-local function can_see_head(enemy_unit, player)
+local function can_see_head(enemy_unit, player, physics_world)
     local head_node = Unit.node(enemy_unit, "j_head")
     if not head_node then
         return false
     end
 
-    local unit_data_ext = ScriptUnit.extension(player.player_unit, "unit_data_system")
+    local unit_data_ext = ScriptUnit_extension(player.player_unit, "unit_data_system")
     local shooting_pos = unit_data_ext:read_component("first_person").position
 
     local head_pos = Unit.world_position(enemy_unit, head_node)
     local dir = head_pos - shooting_pos
     local dist = Vector3_length(dir)
     dir = Vector3_normalize(dir)
-
-    local physics_world = World.physics_world(Application.main_world())
 
     local hits_dynamics = HitScan.raycast(physics_world, shooting_pos, dir, dist, nil, "filter_player_character_shooting_raycast_dynamics", 0, true, player, false)
 
@@ -183,7 +187,7 @@ local function can_see_head(enemy_unit, player)
     local hits_statics = PhysicsWorld.raycast(physics_world, shooting_pos, dir, dist, "all", "types", "statics", "max_hits", 256, "collision_filter", "filter_player_character_shooting_raycast_statics")
 
     if hits_statics and #hits_statics > 0 then
-        local wall_distance = hits_statics[1].distance or hits_statics[1][2] or math.huge
+        local wall_distance = hits_statics[1].distance or hits_statics[1][2] or math_huge
         if wall_distance < target_head_hit then
             return false
         end
@@ -209,7 +213,7 @@ local function auto_aim_priority_targets(player_unit)
     end
 
     local camera_pos = Managers.state.camera:camera_position(player.viewport_name)
-    local unit_data_ext = ScriptUnit.extension(player_unit, "unit_data_system")
+    local unit_data_ext = ScriptUnit_extension(player_unit, "unit_data_system")
     local recoil_component = unit_data_ext:read_component("recoil")
 
     local camera_forward, min_dot
@@ -220,11 +224,12 @@ local function auto_aim_priority_targets(player_unit)
         min_dot = math_cos(math_rad(mod:get("fov_angle") * 0.5))
     end
 
+    local physics_world = World.physics_world(Application.main_world())
     local enemies = get_all_enemies()
     for i = 1, #enemies do
         local enemy = enemies[i]
         if not fov_check_enabled or is_in_fov(enemy.unit, camera_pos, camera_forward, min_dot) then
-            if can_see_head(enemy.unit, player) == "visible" then
+            if can_see_head(enemy.unit, player, physics_world) == "visible" then
                 has_target = true
                 look_at_enemy_head(enemy.unit, player, camera_pos, recoil_component.pitch_offset, recoil_component.yaw_offset)
                 return
@@ -277,7 +282,7 @@ local function get_current_weapon_info()
         return nil, "full_auto", false
     end
 
-    local unit_data_ext = ScriptUnit.extension(player.player_unit, "unit_data_system")
+    local unit_data_ext = ScriptUnit_extension(player.player_unit, "unit_data_system")
     if not unit_data_ext then
         return nil, "full_auto", false
     end
@@ -290,7 +295,6 @@ local function get_current_weapon_info()
     local alternate_fire_component = unit_data_ext:read_component("alternate_fire")
     local is_ads = alternate_fire_component and alternate_fire_component.is_active or false
 
-    local WeaponTemplate = require("scripts/utilities/weapon/weapon_template")
     local weapon_template = WeaponTemplate.current_weapon_template(weapon_action_component)
 
     if not weapon_template then
@@ -306,19 +310,16 @@ local function is_crosshair_on_enemy()
         return false
     end
 
-    local unit_data_ext = ScriptUnit.extension(player.player_unit, "unit_data_system")
+    local unit_data_ext = ScriptUnit_extension(player.player_unit, "unit_data_system")
     local camera_pos = Managers.state.camera:camera_position(player.viewport_name)
     local camera_rot = Managers.state.camera:camera_rotation(player.viewport_name)
 
-    local weapon_extension = ScriptUnit.extension(player.player_unit, "weapon_system")
+    local weapon_extension = ScriptUnit_extension(player.player_unit, "weapon_system")
     local recoil_template = weapon_extension:recoil_template()
     local sway_template = weapon_extension:sway_template()
     local movement_state_component = unit_data_ext:read_component("movement_state")
     local recoil_component = unit_data_ext:read_component("recoil")
     local sway_component = unit_data_ext:read_component("sway")
-
-    local Recoil = require("scripts/utilities/recoil")
-    local Sway = require("scripts/utilities/sway")
 
     local ray_rotation = Recoil.apply_weapon_recoil_rotation(recoil_template, recoil_component, movement_state_component, camera_rot)
     ray_rotation = Sway.apply_sway_rotation(sway_template, sway_component, movement_state_component, ray_rotation)
@@ -326,15 +327,11 @@ local function is_crosshair_on_enemy()
     local direction = Quaternion.forward(ray_rotation)
     local max_distance = 150
 
-    local unit_data_extension = ScriptUnit.has_extension(player.player_unit, "unit_data_system") and ScriptUnit.extension(player.player_unit, "unit_data_system")
-    if unit_data_extension then
-        local weapon_action_component = unit_data_extension:read_component("weapon_action")
-        if weapon_action_component then
-            local WeaponTemplate = require("scripts/utilities/weapon/weapon_template")
-            local weapon_template = WeaponTemplate.current_weapon_template(weapon_action_component)
-            if weapon_template and weapon_template.hit_scan_template and weapon_template.hit_scan_template.range then
-                max_distance = weapon_template.hit_scan_template.range
-            end
+    local weapon_action_component = unit_data_ext:read_component("weapon_action")
+    if weapon_action_component then
+        local weapon_template = WeaponTemplate.current_weapon_template(weapon_action_component)
+        if weapon_template and weapon_template.hit_scan_template and weapon_template.hit_scan_template.range then
+            max_distance = weapon_template.hit_scan_template.range
         end
     end
 
@@ -347,52 +344,47 @@ local function is_crosshair_on_enemy()
 
     local weakspot_only = mod:get("triggerbot_weakspot_only")
     local respect_priority = mod:get("triggerbot_respect_priority")
+    local hits_statics = PhysicsWorld.raycast(physics_world, camera_pos, direction, max_distance, "all", "types", "statics", "max_hits", 256, "collision_filter", "filter_player_character_shooting_raycast_statics")
+    local wall_distance = math_huge
+    if hits_statics and #hits_statics > 0 then
+        wall_distance = hits_statics[1].distance or hits_statics[1][2] or math_huge
+    end
 
     for i = 1, #hits do
         local hit = hits[i]
-        if not hit then
-            goto continue_hit_loop
-        end
-        local actor = hit.actor or hit[4]
-        if actor then
-            local hit_unit = Actor.unit(actor)
-            if hit_unit and hit_unit ~= player.player_unit and ScriptUnit.has_extension(hit_unit, "health_system") then
-                local health_ext = ScriptUnit.extension(hit_unit, "health_system")
-                if health_ext and health_ext:is_alive() then
-                    local breed = Breed.unit_breed_or_nil(hit_unit)
-                    if breed and not Breed.is_player(breed) and not (breed.name and breed.name:find("hazard")) then
-                        local zone_name = HitZone.get_name(hit_unit, actor)
+        if hit then
+            local actor = hit.actor or hit[4]
+            if actor then
+                local hit_unit = Actor.unit(actor)
+                if hit_unit and hit_unit ~= player.player_unit and ScriptUnit_has_extension(hit_unit, "health_system") then
+                    local health_ext = ScriptUnit_extension(hit_unit, "health_system")
+                    if health_ext:is_alive() then
+                        local breed = Breed.unit_breed_or_nil(hit_unit)
+                        if breed and not Breed.is_player(breed) and not breed.name:find("hazard") then
+                            local zone_name = HitZone.get_name(hit_unit, actor)
 
-                        if zone_name == HitZone.hit_zone_names.afro then
-                            goto continue_hit_loop
-                        end
-                        
-                        if zone_name == HitZone.hit_zone_names.shield then
-                            return false
-                        end
-
-                        if weakspot_only then
-                            if zone_name ~= HitZone.hit_zone_names.head and zone_name ~= HitZone.hit_zone_names.weakspot then
+                            if zone_name == HitZone.hit_zone_names.afro or zone_name == HitZone.hit_zone_names.shield then
+                                if zone_name == HitZone.hit_zone_names.shield then
+                                    return false
+                                end
                                 goto continue_hit_loop
                             end
-                        end
 
-                        if respect_priority then
-                            if get_breed_priority(breed.name, hit_unit) == 0 then
+                            if weakspot_only and zone_name ~= HitZone.hit_zone_names.head and zone_name ~= HitZone.hit_zone_names.weakspot then
                                 goto continue_hit_loop
                             end
-                        end
 
-                        local hit_distance = hit.distance or hit[2] or 0
-                        local hits_statics = PhysicsWorld.raycast(physics_world, camera_pos, direction, max_distance, "all", "types", "statics", "max_hits", 256, "collision_filter", "filter_player_character_shooting_raycast_statics")
-                        if hits_statics and #hits_statics > 0 then
-                            local wall_distance = hits_statics[1].distance or hits_statics[1][2] or math.huge
+                            if respect_priority and get_breed_priority(breed.name, hit_unit) == 0 then
+                                goto continue_hit_loop
+                            end
+
+                            local hit_distance = hit.distance or hit[2] or 0
                             if wall_distance < hit_distance then
                                 goto continue_hit_loop
                             end
-                        end
 
-                        return true
+                            return true
+                        end
                     end
                 end
             end
