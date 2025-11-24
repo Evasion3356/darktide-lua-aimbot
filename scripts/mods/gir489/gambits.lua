@@ -144,7 +144,7 @@ local function is_in_fov(enemy_unit, camera_pos, camera_forward, min_dot)
     return Vector3_dot(camera_forward, Vector3_normalize(head_pos - camera_pos)) >= min_dot
 end
 
-local function can_see_head(enemy_unit, player, physics_world)
+local function can_see_head(enemy_unit, player)
     local head_node = Unit.node(enemy_unit, "j_head")
     if not head_node then
         return false
@@ -158,6 +158,7 @@ local function can_see_head(enemy_unit, player, physics_world)
     local dist = Vector3_length(dir)
     dir = Vector3_normalize(dir)
 
+    local physics_world = World.physics_world(Application.main_world())
     local hits_dynamics = HitScan.raycast(physics_world, shooting_pos, dir, dist, nil, "filter_player_character_shooting_raycast_dynamics", 0, true, player, false)
 
     local target_head_hit = nil
@@ -224,12 +225,11 @@ local function auto_aim_priority_targets(player_unit)
         min_dot = math_cos(math_rad(mod:get("fov_angle") * 0.5))
     end
 
-    local physics_world = World.physics_world(Application.main_world())
     local enemies = get_all_enemies()
     for i = 1, #enemies do
         local enemy = enemies[i]
         if not fov_check_enabled or is_in_fov(enemy.unit, camera_pos, camera_forward, min_dot) then
-            if can_see_head(enemy.unit, player, physics_world) == "visible" then
+            if can_see_head(enemy.unit, player) == "visible" then
                 has_target = true
                 look_at_enemy_head(enemy.unit, player, camera_pos, recoil_component.pitch_offset, recoil_component.yaw_offset)
                 return
@@ -344,11 +344,6 @@ local function is_crosshair_on_enemy()
 
     local weakspot_only = mod:get("triggerbot_weakspot_only")
     local respect_priority = mod:get("triggerbot_respect_priority")
-    local hits_statics = PhysicsWorld.raycast(physics_world, camera_pos, direction, max_distance, "all", "types", "statics", "max_hits", 256, "collision_filter", "filter_player_character_shooting_raycast_statics")
-    local wall_distance = math_huge
-    if hits_statics and #hits_statics > 0 then
-        wall_distance = hits_statics[1].distance or hits_statics[1][2] or math_huge
-    end
 
     for i = 1, #hits do
         local hit = hits[i]
@@ -363,11 +358,12 @@ local function is_crosshair_on_enemy()
                         if breed and not Breed.is_player(breed) and not breed.name:find("hazard") then
                             local zone_name = HitZone.get_name(hit_unit, actor)
 
-                            if zone_name == HitZone.hit_zone_names.afro or zone_name == HitZone.hit_zone_names.shield then
-                                if zone_name == HitZone.hit_zone_names.shield then
-                                    return false
-                                end
+                            if zone_name == HitZone.hit_zone_names.afro then
                                 goto continue_hit_loop
+                            end
+
+                            if zone_name == HitZone.hit_zone_names.shield then
+                                return false
                             end
 
                             if weakspot_only and zone_name ~= HitZone.hit_zone_names.head and zone_name ~= HitZone.hit_zone_names.weakspot then
@@ -379,8 +375,12 @@ local function is_crosshair_on_enemy()
                             end
 
                             local hit_distance = hit.distance or hit[2] or 0
-                            if wall_distance < hit_distance then
-                                goto continue_hit_loop
+                            local hits_statics = PhysicsWorld.raycast(physics_world, camera_pos, direction, max_distance, "all", "types", "statics", "max_hits", 256, "collision_filter", "filter_player_character_shooting_raycast_statics")
+                            if hits_statics and #hits_statics > 0 then
+                                local wall_distance = hits_statics[1].distance or hits_statics[1][2] or math_huge
+                                if wall_distance < hit_distance then
+                                    goto continue_hit_loop
+                                end
                             end
 
                             return true
