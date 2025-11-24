@@ -208,14 +208,9 @@ local function process_hits_visibility(is_server, world, physics_world, attacker
     local penetration_config = damage_config and damage_config.penetration
     local damage_profile = damage_config and impact_config and impact_config.damage_profile
 
-    -- If no penetration config exists, create a default one for visibility checks
-    -- This allows the aimbot to see through thin walls even if the weapon doesn't penetrate
+    -- Only allow penetration if the weapon actually has penetration configured
     if not penetration_config then
-        log_to_console("[PHV] No penetration_config found, using default")
-        penetration_config = {
-            depth = 0.5,  -- 0.5 meters default penetration for visibility
-            destroy_on_exit = false
-        }
+        log_to_console("[PHV] No penetration_config found - weapon cannot penetrate walls")
     end
 
     -- follow engine style for optional attacker breed
@@ -387,62 +382,25 @@ local function process_hits_visibility(is_server, world, physics_world, attacker
                 local exit_pos, exit_normal, exit_unit = ObjectPenetration.test_for_penetration(physics_world, hit_position, direction, penetration_config.depth)
 
                 if exit_pos then
-                    -- Successfully penetrated!
+                    -- Successfully penetrated through the wall
                     local object_thickness = Vector3.distance(hit_position, exit_pos)
                     exit_distance = hit_distance + object_thickness
                     penetrated = true
                     try_penetration = false  -- Only penetrate once
-                    
+
                     log_to_console("[PHV] Hit[" .. index .. "] penetrated object thickness=" .. tostring(object_thickness) .. " new exit_distance=" .. tostring(exit_distance))
-                    
-                    -- CRITICAL: After penetrating, we need to raycast AGAIN from the exit point
-                    -- to find targets beyond the wall
-                    local remaining_distance = max_distance - exit_distance
-                    if remaining_distance > 0.1 then
-                        log_to_console("[PHV] Hit[" .. index .. "] doing secondary raycast from exit point, remaining_dist=" .. tostring(remaining_distance))
-                        
-                        -- Raycast from exit point to find enemies beyond
-                        local HitScan = require("scripts/utilities/attack/hit_scan")
-                        local secondary_hits_dynamics = HitScan.raycast(physics_world, exit_pos, direction, remaining_distance, nil, "filter_player_character_shooting_raycast_dynamics", 0, optional_is_local_unit, optional_player, false)
-                        
-                        if secondary_hits_dynamics and #secondary_hits_dynamics > 0 then
-                            log_to_console("[PHV] Hit[" .. index .. "] secondary raycast found " .. #secondary_hits_dynamics .. " hits")
-                            
-                            -- Insert secondary hits into main hits array AFTER current position
-                            -- Insert in reverse order so they maintain correct order after insertion
-                            for i = #secondary_hits_dynamics, 1, -1 do
-                                local sec_hit = secondary_hits_dynamics[i]
-                                -- Adjust distance to be relative to original start position
-                                local original_dist = sec_hit.distance or sec_hit[2] or 0
-                                local adjusted_dist = exit_distance + original_dist
-                                
-                                -- Create a new hit table with adjusted distance
-                                local adjusted_hit = {}
-                                for k, v in pairs(sec_hit) do
-                                    adjusted_hit[k] = v
-                                end
-                                adjusted_hit.distance = adjusted_dist
-                                adjusted_hit[2] = adjusted_dist
-                                
-                                table.insert(hits, index + 1, adjusted_hit)
-                                log_to_console("[PHV] Hit[" .. index .. "] added secondary hit at adjusted dist=" .. tostring(adjusted_dist))
-                            end
-                            
-                            -- Update the total number of hits to process
-                            log_to_console("[PHV] Hit[" .. index .. "] total hits after insertion: " .. #hits)
-                        end
-                    end
-                    
-                    -- Check if we should destroy on exit
+
+                    -- Check if we should destroy on exit (wall blocks further penetration)
                     if penetration_config.destroy_on_exit then
                         log_to_console("[PHV] Hit[" .. index .. "] destroy_on_exit -> return false")
                         return false
                     end
-                    
-                    -- Continue to process hits beyond the exit point (including newly added secondary hits)
+
+                    -- Continue processing to see what's beyond the wall
                     goto continue
                 else
-                    log_to_console("[PHV] Hit[" .. index .. "] penetration failed, occluded")
+                    log_to_console("[PHV] Hit[" .. index .. "] penetration failed, wall is solid")
+                    return false
                 end
             end
 
@@ -538,114 +496,67 @@ local function can_see_head(enemy_unit, player)
 
     local HitScan = require("scripts/utilities/attack/hit_scan")
 
-    -- Do TWO raycasts and merge results:
-    -- 1. Dynamics (enemies, players)
+    -- First check: Can we see the head in dynamics?
     local hits_dynamics = HitScan.raycast(physics_world, shooting_pos, dir, max_distance, nil, "filter_player_character_shooting_raycast_dynamics", 0, true, player, false)
 
-    log_to_console("[HEAD] Raycast from " .. tostring(shooting_pos) .. " to head, direction=" .. tostring(dir) .. ", max_dist=" .. tostring(max_distance))
-    log_to_console("[HEAD] Total hits from dynamics raycast: " .. tostring(hits_dynamics and #hits_dynamics or 0))
+    log_to_console("[HEAD] Raycast from " .. tostring(shooting_pos) .. " to head")
+    log_to_console("[HEAD] Dynamics hits: " .. tostring(hits_dynamics and #hits_dynamics or 0))
 
-    -- Check all hits for the target and look for a head hit
-    local target_found = false
-    local target_zone_name = nil
-    local head_distance = math.huge
-
+    -- Check if we can hit the target's head in the dynamics raycast
+    local target_head_hit = nil
     if hits_dynamics then
         for i = 1, #hits_dynamics do
             local hit = hits_dynamics[i]
             local actor = hit.actor or hit[4]
-            local hit_dist = hit.distance or hit[2] or 0
             if actor then
                 local unit = Actor.unit(actor)
                 if unit == enemy_unit then
-                    -- Found a hit on the target
                     local zone_name = HitZone.get_name(unit, actor)
-                    log_to_console("[HEAD] Hit[" .. i .. "] distance=" .. tostring(hit_dist) .. " on target, zone=" .. tostring(zone_name))
+                    local hit_dist = hit.distance or hit[2] or 0
+                    log_to_console("[HEAD] Hit on target at distance " .. tostring(hit_dist) .. ", zone=" .. tostring(zone_name))
 
-                    target_found = true
-
-                    -- Shield blocks targeting completely
+                    -- Shield blocks targeting
                     if zone_name == HitZone.hit_zone_names.shield then
                         log_to_console("[HEAD] Target has shield -> NOT VISIBLE")
                         return false
                     end
 
-                    -- If it's a head hit, record the distance
+                    -- Record head hit if found
                     if zone_name == HitZone.hit_zone_names.head then
-                        head_distance = hit_dist
-                        log_to_console("[HEAD] Head hit found at distance " .. tostring(head_distance))
+                        target_head_hit = {
+                            distance = hit_dist,
+                            position = hit.position or hit[1]
+                        }
+                        log_to_console("[HEAD] Head hit found at distance " .. tostring(hit_dist))
                     end
-
-                    -- Record the first non-head zone we hit (for logging)
-                    if not target_zone_name then
-                        target_zone_name = zone_name
-                    end
-                    -- Continue iterating to find a head hit
                 end
             end
         end
     end
 
-    if not target_found then
-        log_to_console("[HEAD] Target not found in raycast at all")
+    if not target_head_hit then
+        log_to_console("[HEAD] Target head not found in dynamics raycast")
         return false
     end
 
-    if head_distance == math.huge then
-        log_to_console("[HEAD] No head hit found (first hit was " .. tostring(target_zone_name) .. "), target not visible")
-        return false
-    end
-
-    -- 2. Statics (walls, floors, environment) - check if wall is blocking the head
+    -- Second check: Are there walls blocking the head?
     local hits_statics = PhysicsWorld.raycast(physics_world, shooting_pos, dir, max_distance, "all", "types", "statics", "max_hits", 256, "collision_filter", "filter_player_character_shooting_raycast_statics")
 
-    -- Check if the first wall is closer than the head
-    local first_wall_distance = math.huge
-    local first_wall_position = nil
+    log_to_console("[HEAD] Statics hits: " .. tostring(hits_statics and #hits_statics or 0))
+
+    -- Check if first wall is closer than head
     if hits_statics and #hits_statics > 0 then
-        first_wall_distance = hits_statics[1].distance or hits_statics[1][2] or math.huge
-        first_wall_position = hits_statics[1].position or hits_statics[1][1]
-        log_to_console("[HEAD] First wall at distance " .. tostring(first_wall_distance) .. ", head at distance " .. tostring(head_distance))
+        local wall_distance = hits_statics[1].distance or hits_statics[1][2] or math.huge
+        log_to_console("[HEAD] First wall at distance " .. tostring(wall_distance) .. ", head at distance " .. tostring(target_head_hit.distance))
+
+        if wall_distance < target_head_hit.distance then
+            log_to_console("[HEAD] Wall blocks head -> NOT VISIBLE (walls block targeting)")
+            return false
+        end
     end
 
-    -- If head is closer than any wall, it's visible
-    if head_distance < first_wall_distance then
-        log_to_console("[HEAD] Head is closer than wall -> VISIBLE")
-        return "visible"
-    end
-
-    -- Head is blocked by wall, try penetration
-    log_to_console("[HEAD] Wall is blocking head, attempting penetration...")
-    local ObjectPenetration = require("scripts/utilities/attack/object_penetration")
-
-    -- Get penetration depth from weapon template
-    local penetration_depth = 0.75  -- default fallback
-    if hit_scan_template and hit_scan_template.damage and hit_scan_template.damage.penetration then
-        penetration_depth = hit_scan_template.damage.penetration.depth or 0.75
-    end
-
-    -- Try to penetrate through the wall
-    local exit_pos, exit_normal, exit_unit = ObjectPenetration.test_for_penetration(physics_world, first_wall_position, dir, penetration_depth)
-
-    if not exit_pos then
-        log_to_console("[HEAD] Penetration failed -> NOT VISIBLE")
-        return false
-    end
-
-    -- Penetration succeeded, check if head is beyond the wall
-    local object_thickness = Vector3_length(exit_pos - first_wall_position)
-    local exit_distance = first_wall_distance + object_thickness
-
-    log_to_console("[HEAD] Penetrated wall, thickness=" .. tostring(object_thickness) .. ", exit_distance=" .. tostring(exit_distance) .. ", head_distance=" .. tostring(head_distance))
-
-    if head_distance > exit_distance then
-        -- Head is beyond the penetrated wall
-        log_to_console("[HEAD] Head is beyond wall exit -> PENETRABLE")
-        return "penetrable"
-    else
-        log_to_console("[HEAD] Head is still in wall thickness -> NOT VISIBLE")
-        return false
-    end
+    log_to_console("[HEAD] No walls blocking -> VISIBLE")
+    return "visible"
 end
 
 -- Check if crosshair is directly on an enemy (raycast from camera)
@@ -734,7 +645,7 @@ local function is_crosshair_on_enemy()
     local hits_dynamics = HitScan.raycast(physics_world, camera_pos, direction, max_distance, nil, "filter_player_character_shooting_raycast_dynamics", 0, true, player, false)
     -- 2. Statics (walls, floors, environment)
     local hits_statics = PhysicsWorld.raycast(physics_world, camera_pos, direction, max_distance, "all", "types", "statics", "max_hits", 256, "collision_filter", "filter_player_character_shooting_raycast_statics")
-    
+
     -- Merge both hit arrays
     local hits = {}
     if hits_dynamics then
@@ -983,12 +894,6 @@ local _get = function(self, input_service, action_name)
     local keybind = mod:get("triggerbot_keybind")
     local has_keybind = next(keybind) ~= nil
     local should_fire = (triggerbot_pressed or not has_keybind)
-    
-    log_to_console("[Triggerbot] Action: " .. action_name .. 
-             " | Enabled: " .. tostring(triggerbot_enabled) ..
-             " | Has keybind: " .. tostring(has_keybind) ..
-             " | Pressed: " .. tostring(triggerbot_pressed) ..
-             " | Should fire: " .. tostring(should_fire))
     
     if triggerbot_enabled and should_fire then
         local use_raycast = mod:get("triggerbot_use_raycast")
