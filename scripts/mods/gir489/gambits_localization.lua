@@ -20,12 +20,12 @@ local loc = {
     },
     Lowest = {
         en = "Lowest",
-        ru = "Самый низкий",
+        ru = "Минимальный",
         de = "Am niedrigsten"
     },
     Lower = {
         en = "Lower",
-        ru = "Ниже",
+        ru = "Очень низкий",
         de = "Niedriger"
     },
     Low = {
@@ -206,12 +206,12 @@ local loc = {
     },
     target_hounds = {
         en = "Target Pox Hounds",
-        ru = "Наводиться на Покс-гончих",
+        ru = "Наводиться на Чумных гончих",
         de = "Pox-Hunde anvisieren"
     },
     target_hounds_description = {
         en = "Automatically aim at Pox Hounds",
-        ru = "Автоматически наводиться на Покс-гончих",
+        ru = "Автоматически наводиться на Чумных гончих",
         de = "Automatisch Pox-Hunde anvisieren"
     },
     target_netgunners = {
@@ -276,32 +276,32 @@ local loc = {
     },
     target_ogryns = {
         en = "Target Ogryns (Gunner)",
-        ru = "Наводиться на Огринов (Стрелков)",
+        ru = "Наводиться на Огринов-Пулеметчиков",
         de = "Ogryns anvisieren (Schützen)"
     },
     target_ogryns_description = {
         en = "Automatically aim at Ogryns. (Gunner/Brute)",
-        ru = "Автоматически наводиться на Огринов (Стрелков/Громил).",
+        ru = "Автоматически наводиться на Огринов-Пулеметчиков (Жнецов).",
         de = "Automatisch Ogryns anvisieren (Schützen/Brute)."
     },
     target_ogryns_melee = {
         en = "Target Ogryns (Melee)",
-        ru = "Наводиться на Огринов",
+        ru = "Наводиться на Огринов-Громил",
         de = "Ogryns anvisieren"
     },
     target_ogryns_melee_description = {
         en = "Automatically aim at Ogryns. (Bulwark/Crusher)",
-        ru = "Автоматически наводиться на Огринов (Щитоносец/Дробитель).",
+        ru = "Автоматически наводиться на Огринов со щитом/Дробителей.",
         de = "Automatisch Ogryns anvisieren (Bulwark/Crusher)."
     },
     target_mauler = {
         en = "Target Scab Maulers",
-        ru = "Наводиться на Бешеных Шрамников",
+        ru = "Наводиться на Скабов-Палачей",
         de = "Scab-Maulere anvisieren"
     },
     target_mauler_description = {
         en = "Automatically aim at Scab Maulers.",
-        ru = "Автоматически наводиться на Бешеных Шрамников.",
+        ru = "Автоматически наводиться на Скабов-Палачей.",
         de = "Automatisch Scab-Maulere anvisieren."
     }
 }
