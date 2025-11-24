@@ -303,27 +303,6 @@ local loc = {
         en = "Automatically aim at Scab Maulers.",
         ru = "Автоматически наводиться на Бешеных Шрамников.",
         de = "Automatisch Scab-Maulere anvisieren."
-    },
-
-    debug = {
-        en = "Debug",
-        ru = "Отладка",
-        de = "Debug"
-    },
-    debug_description = {
-        en = "Enable debug messages in the console.",
-        ru = "Включить отладочные сообщения в консоли.",
-        de = "Debug-Nachrichten in der Konsole aktivieren."
-    },
-    enable_logging = {
-        en = "Enable Logging",
-        ru = "Включить логирование",
-        de = "Protokollierung aktivieren"
-    },
-    enable_logging_description = {
-        en = "If enabled, debug messages will be printed to the console.",
-        ru = "Если включено, отладочные сообщения будут выводиться в консоль.",
-        de = "Wenn aktiviert, werden Debug-Nachrichten in der Konsole ausgegeben."
     }
 }
 

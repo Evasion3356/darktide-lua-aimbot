@@ -90,12 +90,12 @@ return {
                     {
                         setting_id = "enable_triggerbot",
                         type = "checkbox",
-                        default_value = false
+                        default_value = true
                     },
                     {
                         setting_id = "triggerbot_use_raycast",
                         type = "checkbox",
-                        default_value = false
+                        default_value = true
                     },
                     {
                         setting_id = "triggerbot_weakspot_only",
@@ -105,12 +105,12 @@ return {
                     {
                         setting_id = "triggerbot_respect_priority",
                         type = "checkbox",
-                        default_value = true
+                        default_value = false
                     },
                     {
                         setting_id = "triggerbot_keybind",
                         type = "keybind",
-                        default_value = {},
+                        default_value = {"extra_2"},
                         keybind_global = true,
                         keybind_trigger = "held",
                         keybind_type = "function_call",
@@ -126,7 +126,7 @@ return {
                         setting_id = "target_bosses",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 1
+                        default_value = 2
                     },
                     {
                         setting_id = "target_berzerkers",
@@ -180,7 +180,7 @@ return {
                         setting_id = "target_ogryns_melee",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 2
+                        default_value = 1
                     },
                     {
                         setting_id = "target_ogryns",
@@ -192,18 +192,7 @@ return {
                         setting_id = "target_mauler",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 2
-                    }
-                }
-            },
-            {
-                setting_id = "debug",
-                type = "group",
-                sub_widgets = {
-                    {
-                        setting_id = "enable_logging",
-                        type = "checkbox",
-                        default_value = false
+                        default_value = 3
                     }
                 }
             },
