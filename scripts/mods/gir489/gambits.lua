@@ -7,7 +7,7 @@ local Recoil = require("scripts/utilities/recoil")
 local Sway = require("scripts/utilities/sway")
 
 local HALF_PI = math.pi / 2
-local DAEMONHOST_PASSIVE_STAGE = 1
+local DAEMONHOST_AGGROED_STAGE = 6
 
 local aim_button_pressed = false
 local triggerbot_pressed = false
@@ -78,11 +78,14 @@ local function get_breed_priority(breed_name, unit)
     local is_daemonhost = breed_name == "chaos_daemonhost" or breed_name == "chaos_mutator_daemonhost"
 
     if is_daemonhost and priority > 0 then
-        local blackboard = BLACKBOARDS[unit]
-        if blackboard and blackboard.perception and blackboard.perception.aggro_state == "aggroed" then
-            return priority
+        local game_object_id = Managers.state.unit_spawner:game_object_id(unit)
+        if game_object_id then
+            local game_session = Managers.state.game_session:game_session()
+            local stage = GameSession.game_object_field(game_session, game_object_id, "stage")
+            if stage ~= DAEMONHOST_AGGROED_STAGE then
+                return 0
+            end
         end
-        return 0
     end
 
     return priority

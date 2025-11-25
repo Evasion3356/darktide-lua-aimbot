@@ -206,12 +206,12 @@ local loc = {
     },
     target_hounds = {
         en = "Target Pox Hounds",
-        ru = "Наводиться на Покс-гончих",
+        ru = "Наводиться на Чумных-гончих",
         de = "Pox-Hunde anvisieren"
     },
     target_hounds_description = {
         en = "Automatically aim at Pox Hounds",
-        ru = "Автоматически наводиться на Покс-гончих",
+        ru = "Автоматически наводиться на Чумных-гончих",
         de = "Automatisch Pox-Hunde anvisieren"
     },
     target_netgunners = {
@@ -275,14 +275,14 @@ local loc = {
         de = "Automatisch Mutanten anvisieren."
     },
     target_ogryns = {
-        en = "Target Ogryns (Gunner)",
-        ru = "Наводиться на Огринов (Стрелков)",
-        de = "Ogryns anvisieren (Schützen)"
+        en = "Target Ogryns (Reaper)",
+        ru = "Наводиться на Огринов (Жнец)",
+        de = "Ogryns anvisieren (Schnitter)"
     },
     target_ogryns_description = {
-        en = "Automatically aim at Ogryns. (Gunner/Brute)",
-        ru = "Автоматически наводиться на Огринов (Стрелков/Громил).",
-        de = "Automatisch Ogryns anvisieren (Schützen/Brute)."
+        en = "Automatically aim at Reaper Ogryns.",
+        ru = "Автоматически наводиться на Жнец.",
+        de = "Automatisch Ogryns-Schnitter anvisieren."
     },
     target_ogryns_melee = {
         en = "Target Ogryns (Melee)",
@@ -296,12 +296,12 @@ local loc = {
     },
     target_mauler = {
         en = "Target Scab Maulers",
-        ru = "Наводиться на Бешеных Шрамников",
+        ru = "Наводиться на Скабов-Палачей",
         de = "Scab-Maulere anvisieren"
     },
     target_mauler_description = {
         en = "Automatically aim at Scab Maulers.",
-        ru = "Автоматически наводиться на Бешеных Шрамников.",
+        ru = "Автоматически наводиться на Скабов-Палачей.",
         de = "Automatisch Scab-Maulere anvisieren."
     }
 }
