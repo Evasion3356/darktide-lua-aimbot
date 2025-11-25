@@ -164,7 +164,7 @@ local function can_see_head(enemy_unit, player)
     dir = Vector3_normalize(dir)
 
     local physics_world = World.physics_world(Application.main_world())
-    local hits_dynamics = HitScan.raycast(physics_world, shooting_pos, dir, dist, nil, "filter_player_character_shooting_raycast_dynamics", 0, true, player, false)
+    local hits_dynamics = HitScan.raycast(physics_world, shooting_pos, dir, dist, nil, "filter_player_character_shooting_raycast", 0, true, player, false)
 
     local target_head_hit = nil
     if hits_dynamics then
@@ -202,14 +202,31 @@ local function can_see_head(enemy_unit, player)
     return true
 end
 
-local function look_at_enemy_head(enemy_unit, player, camera_pos, recoil_pitch, recoil_yaw)
+local function look_at_enemy_head(enemy_unit, player, shooting_pos, player_unit)
     local head_node = Unit.node(enemy_unit, "j_head")
     if not head_node then
         return
     end
     local head_pos = Unit.world_position(enemy_unit, head_node)
-    local dir = Vector3_normalize(head_pos - camera_pos)
-    player:set_orientation(math_atan2(dir.y, dir.x) - HALF_PI - recoil_yaw, math_asin(dir.z) - recoil_pitch, 0)
+    local dir = Vector3_normalize(head_pos - shooting_pos)
+
+    -- Get base orientation without recoil
+    local base_pitch = math_asin(dir.z)
+    local base_yaw = math_atan2(dir.y, dir.x) - HALF_PI
+
+    -- Apply recoil and sway like the weapon does
+    local unit_data_ext = ScriptUnit_extension(player_unit, "unit_data_system")
+    local weapon_extension = ScriptUnit_extension(player_unit, "weapon_system")
+    local recoil_template = weapon_extension:recoil_template()
+    local recoil_component = unit_data_ext:read_component("recoil")
+    local sway_component = unit_data_ext:read_component("sway")
+    local movement_state_component = unit_data_ext:read_component("movement_state")
+
+    local recoil_pitch, recoil_yaw = Recoil.weapon_offset(recoil_template, recoil_component, movement_state_component)
+    local sway_yaw = sway_component.offset_x
+    local sway_pitch = sway_component.offset_y
+
+    player:set_orientation(base_yaw - recoil_yaw - sway_yaw, base_pitch - recoil_pitch - sway_pitch, 0)
 end
 
 local function get_fire_interval()
@@ -275,25 +292,25 @@ local function auto_aim_priority_targets(player_unit)
         return
     end
 
-    local camera_pos = Managers.state.camera:camera_position(player.viewport_name)
     local unit_data_ext = ScriptUnit_extension(player_unit, "unit_data_system")
-    local recoil_component = unit_data_ext:read_component("recoil")
+    local first_person_component = unit_data_ext:read_component("first_person")
+    local shooting_pos = first_person_component.position
 
     local camera_forward, min_dot
     local fov_check_enabled = mod:get("enable_fov_check")
     if fov_check_enabled then
-        local camera_rot = Managers.state.camera:camera_rotation(player.viewport_name)
-        camera_forward = Quaternion.forward(camera_rot)
+        local first_person_rot = first_person_component.rotation
+        camera_forward = Quaternion.forward(first_person_rot)
         min_dot = math_cos(math_rad(mod:get("fov_angle") * 0.5))
     end
 
     local enemies = get_all_enemies()
     for i = 1, #enemies do
         local enemy = enemies[i]
-        if not fov_check_enabled or is_in_fov(enemy.unit, camera_pos, camera_forward, min_dot) then
+        if not fov_check_enabled or is_in_fov(enemy.unit, shooting_pos, camera_forward, min_dot) then
             if can_see_head(enemy.unit, player) then
                 has_target = true
-                look_at_enemy_head(enemy.unit, player, camera_pos, recoil_component.pitch_offset, recoil_component.yaw_offset)
+                look_at_enemy_head(enemy.unit, player, shooting_pos, player_unit)
                 return
             end
         end
@@ -394,32 +411,26 @@ local function is_crosshair_on_enemy()
     end
 
     local unit_data_ext = ScriptUnit_extension(player.player_unit, "unit_data_system")
-    local camera_pos = Managers.state.camera:camera_position(player.viewport_name)
-    local camera_rot = Managers.state.camera:camera_rotation(player.viewport_name)
+    local first_person_component = unit_data_ext:read_component("first_person")
+    local shooting_pos = first_person_component.position
+    local shooting_rot = first_person_component.rotation
+    local action_component = unit_data_ext:read_component("weapon_action")
 
-    local weapon_extension = ScriptUnit_extension(player.player_unit, "weapon_system")
-    local recoil_template = weapon_extension:recoil_template()
-    local sway_template = weapon_extension:sway_template()
-    local movement_state_component = unit_data_ext:read_component("movement_state")
-    local recoil_component = unit_data_ext:read_component("recoil")
-    local sway_component = unit_data_ext:read_component("sway")
-
-    local ray_rotation = Recoil.apply_weapon_recoil_rotation(recoil_template, recoil_component, movement_state_component, camera_rot)
-    ray_rotation = Sway.apply_sway_rotation(sway_template, sway_component, movement_state_component, ray_rotation)
+    -- Use clean first_person component for triggerbot raycast
+    local ray_rotation = shooting_rot
 
     local direction = Quaternion.forward(ray_rotation)
     local max_distance = 150
 
-    local weapon_action_component = unit_data_ext:read_component("weapon_action")
-    if weapon_action_component then
-        local weapon_template = WeaponTemplate.current_weapon_template(weapon_action_component)
+    if action_component then
+        local weapon_template = WeaponTemplate.current_weapon_template(action_component)
         if weapon_template and weapon_template.hit_scan_template and weapon_template.hit_scan_template.range then
             max_distance = weapon_template.hit_scan_template.range
         end
     end
 
     local physics_world = World.physics_world(Application.main_world())
-    local hits = HitScan.raycast(physics_world, camera_pos, direction, max_distance, nil, "filter_player_character_shooting_raycast_dynamics", 0, true, player, false)
+    local hits = HitScan.raycast(physics_world, shooting_pos, direction, max_distance, nil, "filter_player_character_shooting_raycast", 0, true, player, false)
 
     if not hits or #hits == 0 then
         return false
@@ -434,7 +445,11 @@ local function is_crosshair_on_enemy()
             local actor = hit.actor or hit[4]
             if actor then
                 local hit_unit = Actor.unit(actor)
-                if hit_unit and hit_unit ~= player.player_unit and ScriptUnit_has_extension(hit_unit, "health_system") then
+                -- Skip hits on the player itself
+                if hit_unit == player.player_unit then
+                    goto continue_hit_loop
+                end
+                if hit_unit and ScriptUnit_has_extension(hit_unit, "health_system") then
                     local health_ext = ScriptUnit_extension(hit_unit, "health_system")
                     if health_ext:is_alive() then
                         local breed = Breed.unit_breed_or_nil(hit_unit)
@@ -464,7 +479,7 @@ local function is_crosshair_on_enemy()
                             end
 
                             local hit_distance = hit.distance or hit[2] or 0
-                            local hits_statics = PhysicsWorld.raycast(physics_world, camera_pos, direction, max_distance, "all", "types", "statics", "max_hits", 256, "collision_filter", "filter_player_character_shooting_raycast_statics")
+                            local hits_statics = PhysicsWorld.raycast(physics_world, shooting_pos, direction, max_distance, "all", "types", "statics", "max_hits", 256, "collision_filter", "filter_player_character_shooting_raycast_statics")
                             if hits_statics and #hits_statics > 0 then
                                 local wall_distance = hits_statics[1].distance or hits_statics[1][2] or math_huge
                                 if wall_distance < hit_distance then
