@@ -177,7 +177,17 @@ local loc = {
         ru = "Если включено, триггербот будет стрелять только по врагам, отмеченным как приоритетные цели. Это применимо только к режиму Raycast.",
         de = "Wenn aktiviert, feuert der Triggerbot nur auf als Prioritätsziele markierte Gegner. Dies gilt nur für den Raycast-Modus."
     },
-    
+    require_main_weapon = {
+        en = "Require Main Weapon",
+        ru = "Требовать основное оружие",
+        de = "Hauptwaffe erforderlich"
+    },
+    require_main_weapon_description = {
+        en = "If enabled, aimbot will only activate when your main weapon (slot 2) is equipped.",
+        ru = "Если включено, аимбот будет активироваться только при экипировке основного оружия (слот 2).",
+        de = "Wenn aktiviert, wird der Aimbot nur aktiviert, wenn Ihre Hauptwaffe (Slot 2) ausgerüstet ist."
+    },
+
     -- Priority Targets
     priority_targets = {
         en = "Priority Targets",
@@ -206,12 +216,12 @@ local loc = {
     },
     target_hounds = {
         en = "Target Pox Hounds",
-        ru = "Наводиться на Покс-гончих",
+        ru = "Наводиться на Чумных-гончих",
         de = "Pox-Hunde anvisieren"
     },
     target_hounds_description = {
         en = "Automatically aim at Pox Hounds",
-        ru = "Автоматически наводиться на Покс-гончих",
+        ru = "Автоматически наводиться на Чумных-гончих",
         de = "Automatisch Pox-Hunde anvisieren"
     },
     target_netgunners = {
@@ -275,14 +285,14 @@ local loc = {
         de = "Automatisch Mutanten anvisieren."
     },
     target_ogryns = {
-        en = "Target Ogryns (Gunner)",
-        ru = "Наводиться на Огринов (Стрелков)",
-        de = "Ogryns anvisieren (Schützen)"
+        en = "Target Ogryns (Reaper)",
+        ru = "Наводиться на Огринов (Жнец)",
+        de = "Ogryns anvisieren (Schnitter)"
     },
     target_ogryns_description = {
-        en = "Automatically aim at Ogryns. (Gunner/Brute)",
-        ru = "Автоматически наводиться на Огринов (Стрелков/Громил).",
-        de = "Automatisch Ogryns anvisieren (Schützen/Brute)."
+        en = "Automatically aim at Reaper Ogryns.",
+        ru = "Автоматически наводиться на Жнец.",
+        de = "Automatisch Ogryns-Schnitter anvisieren."
     },
     target_ogryns_melee = {
         en = "Target Ogryns (Melee)",
@@ -296,34 +306,13 @@ local loc = {
     },
     target_mauler = {
         en = "Target Scab Maulers",
-        ru = "Наводиться на Бешеных Шрамников",
+        ru = "Наводиться на Скабов-Палачей",
         de = "Scab-Maulere anvisieren"
     },
     target_mauler_description = {
         en = "Automatically aim at Scab Maulers.",
-        ru = "Автоматически наводиться на Бешеных Шрамников.",
+        ru = "Автоматически наводиться на Скабов-Палачей.",
         de = "Automatisch Scab-Maulere anvisieren."
-    },
-
-    debug = {
-        en = "Debug",
-        ru = "Отладка",
-        de = "Debug"
-    },
-    debug_description = {
-        en = "Enable debug messages in the console.",
-        ru = "Включить отладочные сообщения в консоли.",
-        de = "Debug-Nachrichten in der Konsole aktivieren."
-    },
-    enable_logging = {
-        en = "Enable Logging",
-        ru = "Включить логирование",
-        de = "Protokollierung aktivieren"
-    },
-    enable_logging_description = {
-        en = "If enabled, debug messages will be printed to the console.",
-        ru = "Если включено, отладочные сообщения будут выводиться в консоль.",
-        de = "Wenn aktiviert, werden Debug-Nachrichten in der Konsole ausgegeben."
     }
 }
 
