@@ -338,6 +338,27 @@ local function get_current_weapon_info()
     return weapon_template, get_weapon_fire_mode(weapon_template, is_ads), is_ads
 end
 
+local function is_main_weapon_equipped()
+    local player = Managers.player:local_player_safe(1)
+    if not player or not player.player_unit then
+        return false
+    end
+
+    local unit_data_ext = ScriptUnit_extension(player.player_unit, "unit_data_system")
+    if not unit_data_ext then
+        return false
+    end
+
+    local inventory_component = unit_data_ext:read_component("inventory")
+    if not inventory_component then
+        return false
+    end
+
+    -- slot_secondary is the main weapon (ranged), slot_primary is the melee weapon
+    local wielded_slot = inventory_component.wielded_slot
+    return wielded_slot == "slot_secondary"
+end
+
 local function is_crosshair_on_enemy()
     local player = Managers.player:local_player(1)
     if not player or not player.player_unit then
@@ -457,6 +478,10 @@ local _get = function(self, input_service, action_name)
         return self(input_service, action_name)
     end
 
+    if mod:get("require_main_weapon") and not is_main_weapon_equipped() then
+        return self(input_service, action_name)
+    end
+
     local can_fire = mod:get("triggerbot_use_raycast") and is_crosshair_on_enemy() or has_target
 
     if can_fire then
@@ -491,7 +516,7 @@ mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, u
     local use_mouse2 = mod:get("use_mouse2_fallback")
     local should_aim = (use_mouse2 and Mouse.button(Mouse.button_index("right")) > 0.5) or (not use_mouse2 and aim_button_pressed)
 
-    if should_aim then
+    if should_aim and (not mod:get("require_main_weapon") or is_main_weapon_equipped()) then
         auto_aim_priority_targets(unit)
     else
         has_target = false

@@ -177,7 +177,17 @@ local loc = {
         ru = "Если включено, триггербот будет стрелять только по врагам, отмеченным как приоритетные цели. Это применимо только к режиму Raycast.",
         de = "Wenn aktiviert, feuert der Triggerbot nur auf als Prioritätsziele markierte Gegner. Dies gilt nur für den Raycast-Modus."
     },
-    
+    require_main_weapon = {
+        en = "Require Main Weapon",
+        ru = "Требовать основное оружие",
+        de = "Hauptwaffe erforderlich"
+    },
+    require_main_weapon_description = {
+        en = "If enabled, aimbot will only activate when your main weapon (slot 2) is equipped.",
+        ru = "Если включено, аимбот будет активироваться только при экипировке основного оружия (слот 2).",
+        de = "Wenn aktiviert, wird der Aimbot nur aktiviert, wenn Ihre Hauptwaffe (Slot 2) ausgerüstet ist."
+    },
+
     -- Priority Targets
     priority_targets = {
         en = "Priority Targets",

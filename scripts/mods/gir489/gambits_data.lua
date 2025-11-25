@@ -108,6 +108,12 @@ return {
                         default_value = false
                     },
                     {
+                        setting_id = "require_main_weapon",
+                        type = "checkbox",
+                        default_value = true,
+                        localize = true
+                    },
+                    {
                         setting_id = "triggerbot_keybind",
                         type = "keybind",
                         default_value = {"extra_2"},
