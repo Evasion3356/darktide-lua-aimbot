@@ -241,6 +241,20 @@ local function get_fire_interval()
     return fire_interval, current_time
 end
 
+local function is_being_spectated()
+    local player = Managers.player:local_player(1)
+    if not player or not player.player_unit then
+        return false
+    end
+
+    if not ScriptUnit_has_extension(player.player_unit, "first_person") then
+        return false
+    end
+
+    local first_person_ext = ScriptUnit_extension(player.player_unit, "first_person")
+    return first_person_ext._is_first_person_spectated
+end
+
 local function auto_aim_priority_targets(player_unit)
     local player = Managers.player:local_player(1)
     if not player or not player.player_unit then
@@ -363,20 +377,6 @@ local function is_main_weapon_equipped()
     -- slot_secondary is the main weapon (ranged), slot_primary is the melee weapon
     local wielded_slot = inventory_component.wielded_slot
     return wielded_slot == "slot_secondary"
-end
-
-local function is_being_spectated()
-    local player = Managers.player:local_player(1)
-    if not player or not player.player_unit then
-        return false
-    end
-
-    if not ScriptUnit_has_extension(player.player_unit, "first_person") then
-        return false
-    end
-
-    local first_person_ext = ScriptUnit_extension(player.player_unit, "first_person")
-    return first_person_ext._is_first_person_spectated
 end
 
 local function is_crosshair_on_enemy()
