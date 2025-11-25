@@ -242,17 +242,33 @@ local function get_fire_interval()
 end
 
 local function is_being_spectated()
-    local player = Managers.player:local_player(1)
-    if not player or not player.player_unit then
+    local local_player = Managers.player:local_player(1)
+    if not local_player or not local_player.player_unit then
         return false
     end
 
-    if not ScriptUnit_has_extension(player.player_unit, "first_person") then
-        return false
+    local human_players = Managers.player:human_players()
+    for _, player in pairs(human_players) do
+        if player ~= local_player then
+            -- Check if dead
+            if not player:unit_is_alive() then
+                return true
+            end
+
+            -- Check if hogtied
+            if player.player_unit and ScriptUnit_has_extension(player.player_unit, "first_person_system") then
+                local first_person_ext = ScriptUnit_extension(player.player_unit, "first_person_system")
+                if first_person_ext._character_state_component and first_person_ext._character_state_component.__data then
+                    local state_name = first_person_ext._character_state_component.__data.state_name
+                    if state_name == "hogtied" then
+                        return true
+                    end
+                end
+            end
+        end
     end
 
-    local first_person_ext = ScriptUnit_extension(player.player_unit, "first_person")
-    return first_person_ext._is_first_person_spectated
+    return false
 end
 
 local function auto_aim_priority_targets(player_unit)
@@ -262,7 +278,10 @@ local function auto_aim_priority_targets(player_unit)
     end
 
     -- Check if spectate disable is enabled and player is being spectated
-    if mod:get("disable_aimbot_when_spectated") and is_being_spectated() then
+    local spectate_disable_enabled = mod:get("disable_aimbot_when_spectated")
+    local being_spectated = is_being_spectated()
+
+    if spectate_disable_enabled and being_spectated then
         has_target = false
         return
     end
