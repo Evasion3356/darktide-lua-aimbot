@@ -78,9 +78,11 @@ local function get_breed_priority(breed_name, unit)
     local is_daemonhost = breed_name == "chaos_daemonhost" or breed_name == "chaos_mutator_daemonhost"
 
     if is_daemonhost and priority > 0 then
-        local unit_data_extension = ScriptUnit.extension(unit, "unit_data_system")
-        local perception_component = unit_data_extension:read_component("perception")
-        return perception_component.aggro_state == "aggroed"
+        local blackboard = BLACKBOARDS[unit]
+        if blackboard and blackboard.perception and blackboard.perception.aggro_state == "aggroed" then
+            return priority
+        end
+        return 0
     end
 
     return priority
