@@ -74,15 +74,12 @@ local function get_breed_priority(breed_name, unit)
 
     local setting_key = priority_map[breed_name]
     local priority = setting_key and mod:get(setting_key) or 0
+    local is_daemonhost = breed_name == "chaos_daemonhost" or breed_name == "chaos_mutator_daemonhost"
 
-    if breed_name == "chaos_daemonhost" and priority > 0 and unit then
-        local game_object_id = Managers.state.unit_spawner:game_object_id(unit)
-        if game_object_id then
-            local stage = GameSession.game_object_field(Managers.state.game_session:game_session(), game_object_id, "stage")
-            if stage == DAEMONHOST_PASSIVE_STAGE then
-                return 0
-            end
-        end
+    if is_daemonhost and priority > 0 then
+        local unit_data_extension = ScriptUnit.extension(unit, "unit_data_system")
+        local perception_component = unit_data_extension:read_component("perception")
+        return perception_component.aggro_state == "aggroed"
     end
 
     return priority
