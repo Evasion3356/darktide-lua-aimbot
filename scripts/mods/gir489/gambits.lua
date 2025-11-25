@@ -12,6 +12,7 @@ local DAEMONHOST_PASSIVE_STAGE = 1
 local aim_button_pressed = false
 local triggerbot_pressed = false
 local has_target = false
+local last_semi_auto_fire_time = 0
 
 local math_rad = math.rad
 local math_cos = math.cos
@@ -200,6 +201,35 @@ local function look_at_enemy_head(enemy_unit, player, camera_pos, recoil_pitch, 
     local head_pos = Unit.world_position(enemy_unit, head_node)
     local dir = Vector3_normalize(head_pos - camera_pos)
     player:set_orientation(math_atan2(dir.y, dir.x) - HALF_PI - recoil_yaw, math_asin(dir.z) - recoil_pitch, 0)
+end
+
+local function get_fire_interval()
+    -- Get current time from the game using main clock (steadier than gameplay)
+    local current_time = Managers.time:time("main") or 0
+
+    -- Try to get the player's peer connection
+    local player = Managers.player:local_player(1)
+    if not player then
+        return 0.1, current_time -- Default 100ms interval if we can't get latency
+    end
+
+    -- Get the peer ID for the player
+    local peer_id = player:peer_id()
+    if not peer_id then
+        return 0.1, current_time
+    end
+
+    -- Get RTT (round trip time) from Network API - this returns time in seconds
+    local rtt = Network.ping(peer_id)
+    if not rtt or rtt == 0 then
+        return 0.1, current_time
+    end
+
+    -- Double the latency as requested (full roundtrip = client -> server -> client)
+    -- The Network.ping already returns RTT, so we use it as-is and double it
+    local fire_interval = rtt * 2
+
+    return fire_interval, current_time
 end
 
 local function auto_aim_priority_targets(player_unit)
@@ -420,7 +450,14 @@ local _get = function(self, input_service, action_name)
         if (fire_mode == "charge" or fire_mode == "full_auto") and action_name == "action_one_hold" then
             return true
         elseif fire_mode == "semi_auto" and action_name == "action_one_pressed" then
-            return true
+            -- For semi-auto weapons, fire once per latency cycle to avoid sending too many fire events
+            local fire_interval, current_time = get_fire_interval()
+
+            if current_time - last_semi_auto_fire_time >= fire_interval then
+                last_semi_auto_fire_time = current_time
+                return true
+            end
+            return false
         end
     end
 
