@@ -120,7 +120,17 @@ local loc = {
         ru = "Если включено, автонаведение активируется при удержании ПКМ. Если выключено — используется пользовательская клавиша.",
         de = "Wenn aktiviert, wird Auto-Zielen beim Halten von Mouse2 (Rechtsklick) ausgelöst. Wenn deaktiviert, wird die benutzerdefinierte Taste verwendet."
     },
-    
+    disable_aimbot_when_spectated = {
+        en = "Disable Aimbot When Spectated",
+        ru = "Отключить аимбот, когда на вас смотрят",
+        de = "Aimbot deaktivieren, wenn jemand zusieht"
+    },
+    disable_aimbot_when_spectated_description = {
+        en = "If enabled, aimbot will be disabled when another player is spectating you.",
+        ru = "Если включено, аимбот будет отключен, когда на вас смотрит другой игрок.",
+        de = "Wenn aktiviert, wird der Aimbot deaktiviert, wenn ein anderer Spieler Sie beobachtet."
+    },
+
     -- Triggerbot Settings
     triggerbot_settings = {
         en = "Triggerbot Settings",

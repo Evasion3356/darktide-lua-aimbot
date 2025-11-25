@@ -247,6 +247,12 @@ local function auto_aim_priority_targets(player_unit)
         return
     end
 
+    -- Check if spectate disable is enabled and player is being spectated
+    if mod:get("disable_aimbot_when_spectated") and is_being_spectated() then
+        has_target = false
+        return
+    end
+
     local camera_pos = Managers.state.camera:camera_position(player.viewport_name)
     local unit_data_ext = ScriptUnit_extension(player_unit, "unit_data_system")
     local recoil_component = unit_data_ext:read_component("recoil")
@@ -357,6 +363,20 @@ local function is_main_weapon_equipped()
     -- slot_secondary is the main weapon (ranged), slot_primary is the melee weapon
     local wielded_slot = inventory_component.wielded_slot
     return wielded_slot == "slot_secondary"
+end
+
+local function is_being_spectated()
+    local player = Managers.player:local_player(1)
+    if not player or not player.player_unit then
+        return false
+    end
+
+    if not ScriptUnit_has_extension(player.player_unit, "first_person") then
+        return false
+    end
+
+    local first_person_ext = ScriptUnit_extension(player.player_unit, "first_person")
+    return first_person_ext._is_first_person_spectated
 end
 
 local function is_crosshair_on_enemy()

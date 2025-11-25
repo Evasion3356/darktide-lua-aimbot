@@ -80,6 +80,12 @@ return {
                         keybind_trigger = "held",
                         keybind_type = "function_call",
                         function_name = "toggle_aim"
+                    },
+                    {
+                        setting_id = "disable_aimbot_when_spectated",
+                        type = "checkbox",
+                        default_value = true,
+                        localize = true
                     }
                 }
             },
