@@ -241,7 +241,7 @@ local function get_fire_interval()
     return fire_interval, current_time
 end
 
-local function is_being_spectated()
+local function are_teammates_dead()
     local local_player = Managers.player:local_player(1)
     if not local_player or not local_player.player_unit then
         return false
@@ -253,17 +253,6 @@ local function is_being_spectated()
             -- Check if dead
             if not player:unit_is_alive() then
                 return true
-            end
-
-            -- Check if hogtied
-            if player.player_unit and ScriptUnit_has_extension(player.player_unit, "first_person_system") then
-                local first_person_ext = ScriptUnit_extension(player.player_unit, "first_person_system")
-                if first_person_ext._character_state_component and first_person_ext._character_state_component.__data then
-                    local state_name = first_person_ext._character_state_component.__data.state_name
-                    if state_name == "hogtied" then
-                        return true
-                    end
-                end
             end
         end
     end
@@ -277,11 +266,11 @@ local function auto_aim_priority_targets(player_unit)
         return
     end
 
-    -- Check if spectate disable is enabled and player is being spectated
-    local spectate_disable_enabled = mod:get("disable_aimbot_when_spectated")
-    local being_spectated = is_being_spectated()
+    -- Check if disable is enabled when teammates are dead
+    local disable_when_teammates_dead = mod:get("disable_aimbot_when_teammates_are_dead")
+    local teammates_are_dead = are_teammates_dead()
 
-    if spectate_disable_enabled and being_spectated then
+    if disable_when_teammates_dead and teammates_are_dead then
         has_target = false
         return
     end
