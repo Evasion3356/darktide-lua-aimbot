@@ -7,7 +7,6 @@ local Recoil = require("scripts/utilities/recoil")
 local Sway = require("scripts/utilities/sway")
 
 local HALF_PI = math.pi / 2
-local DAEMONHOST_AGGROED_STAGE = 6
 
 local aim_button_pressed = false
 local triggerbot_pressed = false
@@ -24,6 +23,18 @@ local Vector3_dot = Vector3.dot
 local Vector3_length = Vector3.length
 local ScriptUnit_has_extension = ScriptUnit.has_extension
 local ScriptUnit_extension = ScriptUnit.extension
+
+local function get_daemonhost_priority(unit, priority)
+    local game_object_id = Managers.state.unit_spawner:game_object_id(unit)
+    if game_object_id then
+       local game_session = Managers.state.game_session:game_session()
+       local stage = GameSession.game_object_field(game_session, game_object_id, "stage")
+       if stage ~= 6 then --DAEMONHOST_AGGROED_STAGE
+           return priority
+       end
+    end
+    return 0
+end
 
 local function get_breed_priority(breed_name, unit)
     local priority_map = {
@@ -78,14 +89,7 @@ local function get_breed_priority(breed_name, unit)
     local is_daemonhost = breed_name == "chaos_daemonhost" or breed_name == "chaos_mutator_daemonhost"
 
     if is_daemonhost and priority > 0 then
-        local game_object_id = Managers.state.unit_spawner:game_object_id(unit)
-        if game_object_id then
-            local game_session = Managers.state.game_session:game_session()
-            local stage = GameSession.game_object_field(game_session, game_object_id, "stage")
-            if stage ~= DAEMONHOST_AGGROED_STAGE then
-                return 0
-            end
-        end
+        return get_daemonhost_priority(unit, priority)
     end
 
     return priority
@@ -400,8 +404,14 @@ local function is_crosshair_on_enemy()
                                 goto continue_hit_loop
                             end
 
-                            if respect_priority and get_breed_priority(breed.name, hit_unit) == 0 then
+                            local breed_name = breed.name
+                            if respect_priority and get_breed_priority(breed_name, hit_unit) == 0 then
                                 goto continue_hit_loop
+                            else
+                                local is_daemonhost = breed_name == "chaos_daemonhost" or breed_name == "chaos_mutator_daemonhost"
+                                if is_daemonhost and get_daemonhost_priority(hit_unit, 1) == 0 then
+                                    goto continue_hit_loop
+                                end
                             end
 
                             local hit_distance = hit.distance or hit[2] or 0
