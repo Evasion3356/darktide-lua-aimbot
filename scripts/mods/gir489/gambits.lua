@@ -29,7 +29,7 @@ local function get_daemonhost_priority(unit, priority)
     if game_object_id then
        local game_session = Managers.state.game_session:game_session()
        local stage = GameSession.game_object_field(game_session, game_object_id, "stage")
-       if stage ~= 6 then --DAEMONHOST_AGGROED_STAGE
+       if stage == 6 then --DAEMONHOST_AGGROED_STAGE
            return priority
        end
     end
@@ -258,16 +258,20 @@ local function are_teammates_dead()
     end
 
     local human_players = Managers.player:human_players()
+    local game_session_manager = Managers.state.game_session
     for _, player in pairs(human_players) do
         if player ~= local_player then
             -- Check if dead
-            if not player:unit_is_alive() then
+            local peer_id = player:peer_id()
+            local is_connected = game_session_manager:connected_to_client(peer_id)
+            if is_connected and not player:unit_is_alive() then
+                print("dead")
                 return true
             end
             -- Check if hogtied
-            if ScriptUnit_has_extension(player.player_unit, "character_state") then
-                local unit_data = ScriptUnit.extension(player.player_unit, "unit_data_system")
-                local character_state_component = unit_data:read_component("character_state")
+            if player.player_unit then
+                local unit_data_extension = ScriptUnit.extension(player.player_unit, "unit_data_system")
+                local character_state_component = unit_data_extension:read_component("character_state")
                 if character_state_component.state_name == "hogtied" then
                     print("hogtied")
                     return true
