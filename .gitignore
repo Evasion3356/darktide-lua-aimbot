@@ -40,3 +40,4 @@ luac.out
 *.hex
 
 scripts/mods/gir489/scripts/*
+**/.vs/

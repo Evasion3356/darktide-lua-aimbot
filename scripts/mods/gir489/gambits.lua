@@ -13,6 +13,53 @@ local triggerbot_pressed = false
 local has_target = false
 local last_semi_auto_fire_time = 0
 
+local BREED_PRIORITY_MAP = {
+    -- Hound
+    chaos_hound = "target_hounds", --Pox Hound
+    chaos_hound_mutator = "target_hounds", --Pox Hound
+    -- Boss Enemies
+    chaos_beast_of_nurgle = "target_bosses", --Beast of Nurgle
+    chaos_plague_ogryn = "target_bosses", --Plague Ogyrn
+    chaos_spawn = "target_bosses", --Chaos Spawn
+    cultist_captain = "target_bosses", --Admontion Champion
+    renegade_captain = "target_bosses", --Scab Captain
+    renegade_twin_captain = "target_bosses", --Rodin Karnak
+    renegade_twin_captain_two = "target_bosses", --Rinda Karnak
+    chaos_daemonhost = "target_bosses", --Daemonhost (with special check below)
+    chaos_mutator_daemonhost = "target_bosses", --Daemonhost (with special check below)
+    -- Trappers
+    renegade_netgunner = "target_netgunners", --Trapper
+    -- Flamers
+    cultist_flamer = "target_flamers", --Dreg Tox Flamer
+    renegade_flamer = "target_flamers", --Scab Flamer
+    renegade_flamer_mutator = "target_flamers", --Scab Flamer
+    -- Sniper
+    renegade_sniper = "target_snipers", --Sniper
+    -- Bombers
+    chaos_poxwalker_bomber = "target_bombers", --Poxburster
+    cultist_grenadier = "target_bombers", --Dreg Tox Bomber
+    renegade_grenadier = "target_bombers", --Scab Bomber
+    -- Gunners
+    cultist_shocktrooper = "target_gunners", --Dreg Shotgunner
+    cultist_gunner = "target_gunners", --Dreg Gunner
+    renegade_gunner = "target_gunners", --Scab Gunner
+    renegade_plasma_gunner = "target_gunners", --Scab Plasmer Gunner
+    renegade_shocktrooper = "target_gunners", --Scab Shotgunner
+    -- Ragers
+    cultist_berzerker = "target_berzerkers", --Dreg Rager
+    renegade_berzerker = "target_berzerkers", --Scab Rager
+    -- Mauler
+    renegade_executor = "target_mauler", --Scab Mauler
+    -- Mutants
+    cultist_mutant = "target_mutants", --Mutant
+    cultist_mutant_mutator = "target_mutants", --Mutant
+    -- Ogryns (Melee)
+    chaos_ogryn_bulwark = "target_ogryns_melee", --Bulwark
+    chaos_ogryn_executor = "target_ogryns_melee", --Crusher
+    -- Ogryn
+    chaos_ogryn_gunner = "target_ogryns" --Reaper
+}
+
 local math_rad = math.rad
 local math_cos = math.cos
 local math_atan2 = math.atan2
@@ -37,54 +84,7 @@ local function get_daemonhost_priority(unit, priority)
 end
 
 local function get_breed_priority(breed_name, unit)
-    local priority_map = {
-        -- Hound
-        chaos_hound = "target_hounds", --Pox Hound
-        chaos_hound_mutator = "target_hounds", --Pox Hound
-        -- Boss Enemies
-        chaos_beast_of_nurgle = "target_bosses", --Beast of Nurgle
-        chaos_plague_ogryn = "target_bosses", --Plague Ogyrn
-        chaos_spawn = "target_bosses", --Chaos Spawn
-        cultist_captain = "target_bosses", --Admontion Champion
-        renegade_captain = "target_bosses", --Scab Captain
-        renegade_twin_captain = "target_bosses", --Rodin Karnak
-        renegade_twin_captain_two = "target_bosses", --Rinda Karnak
-        chaos_daemonhost = "target_bosses", --Daemonhost (with special check below)
-        chaos_mutator_daemonhost = "target_bosses", --Daemonhost (with special check below)
-        -- Trappers
-        renegade_netgunner = "target_netgunners", --Trapper
-        -- Flamers
-        cultist_flamer = "target_flamers", --Dreg Tox Flamer
-        renegade_flamer = "target_flamers", --Scab Flamer
-        renegade_flamer_mutator = "target_flamers", --Scab Flamer
-        -- Sniper
-        renegade_sniper = "target_snipers", --Sniper
-        -- Bombers
-        chaos_poxwalker_bomber = "target_bombers", --Poxburster
-        cultist_grenadier = "target_bombers", --Dreg Tox Bomber
-        renegade_grenadier = "target_bombers", --Scab Bomber
-        -- Gunners
-        cultist_shocktrooper = "target_gunners", --Dreg Shotgunner
-        cultist_gunner = "target_gunners", --Dreg Gunner
-        renegade_gunner = "target_gunners", --Scab Gunner
-        renegade_plasma_gunner = "target_gunners", --Scab Plasmer Gunner
-        renegade_shocktrooper = "target_gunners", --Scab Shotgunner
-        -- Ragers
-        cultist_berzerker = "target_berzerkers", --Dreg Rager
-        renegade_berzerker = "target_berzerkers", --Scab Rager
-        -- Mauler
-        renegade_executor = "target_mauler", --Scab Mauler
-        -- Mutants
-        cultist_mutant = "target_mutants", --Mutant
-        cultist_mutant_mutator = "target_mutants", --Mutant
-        -- Ogryns (Melee)
-        chaos_ogryn_bulwark = "target_ogryns_melee", --Bulwark
-        chaos_ogryn_executor = "target_ogryns_melee", --Crusher
-        -- Ogryn
-        chaos_ogryn_gunner = "target_ogryns" --Reaper
-    }
-
-    local setting_key = priority_map[breed_name]
+    local setting_key = BREED_PRIORITY_MAP[breed_name]
     local priority = setting_key and mod:get(setting_key) or 0
     local is_daemonhost = breed_name == "chaos_daemonhost" or breed_name == "chaos_mutator_daemonhost"
 
