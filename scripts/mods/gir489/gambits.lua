@@ -271,6 +271,14 @@ local function are_teammates_dead()
             if not player:unit_is_alive() then
                 return true
             end
+			-- Check if hogtied
+            if ScriptUnit_has_extension(player.player_unit, "character_state") then
+				local unit_data = ScriptUnit.extension(player.player_unit, "unit_data_system")
+				local character_state_component = unit_data:read_component("character_state")
+				if character_state_component.state_name == "hogtied" then
+					return true
+				end
+            end
         end
     end
 
