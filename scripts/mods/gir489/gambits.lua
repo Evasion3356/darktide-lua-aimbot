@@ -164,7 +164,7 @@ local function can_see_head(enemy_unit, player)
     dir = Vector3_normalize(dir)
 
     local physics_world = World.physics_world(Application.main_world())
-    local hits_dynamics = HitScan.raycast(physics_world, shooting_pos, dir, dist, nil, "filter_player_character_shooting_raycast", 0, true, player, false)
+    local hits_dynamics = HitScan.raycast(physics_world, shooting_pos, dir, dist, nil, "filter_player_character_shooting_raycast_dynamics", 0, true, player, false)
 
     local target_head_hit = nil
     if hits_dynamics then
@@ -430,7 +430,7 @@ local function is_crosshair_on_enemy()
     end
 
     local physics_world = World.physics_world(Application.main_world())
-    local hits = HitScan.raycast(physics_world, shooting_pos, direction, max_distance, nil, "filter_player_character_shooting_raycast", 0, true, player, false)
+    local hits = HitScan.raycast(physics_world, shooting_pos, direction, max_distance, nil, "filter_player_character_shooting_raycast_dynamics", 0, true, player, false)
 
     if not hits or #hits == 0 then
         return false
