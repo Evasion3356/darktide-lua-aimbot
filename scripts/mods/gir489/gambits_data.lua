@@ -1,4 +1,4 @@
-local mod = get_mod("darktide-lua-aimbot")
+local mod = get_mod("darktide-lua-gambits")
 
 local priority_options = {
     {

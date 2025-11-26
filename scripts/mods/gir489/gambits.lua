@@ -1,4 +1,4 @@
-local mod = get_mod("darktide-lua-aimbot")
+local mod = get_mod("darktide-lua-gambits")
 local HitZone = require("scripts/utilities/attack/hit_zone")
 local Breed = require("scripts/utilities/breed")
 local HitScan = require("scripts/utilities/attack/hit_scan")
@@ -115,21 +115,31 @@ local function get_all_enemies()
     for unit, _ in pairs(entities) do
         if ScriptUnit_has_extension(unit, "health_system") then
             local health_ext = ScriptUnit_extension(unit, "health_system")
-            if health_ext:is_alive() and ScriptUnit_has_extension(unit, "unit_data_system") then
-                local unit_data_ext = ScriptUnit_extension(unit, "unit_data_system")
-                local breed = unit_data_ext:breed()
-                if breed and breed.breed_type ~= "player" and not breed.name:find("hazard") then
-                    local priority = get_breed_priority(breed.name, unit)
-                    if priority > 0 then
-                        n = n + 1
-                        enemies[n] = {
-                            unit = unit,
-                            position = POSITION_LOOKUP[unit],
-                            priority = priority
-                        }
-                    end
-                end
+            if not health_ext:is_alive() then
+                goto next_unit
             end
+
+            if not ScriptUnit_has_extension(unit, "unit_data_system") then
+                goto next_unit
+            end
+
+            local unit_data_ext = ScriptUnit_extension(unit, "unit_data_system")
+            local breed = unit_data_ext:breed()
+            if not breed or breed.breed_type == "player" or breed.name:find("hazard") then
+                goto next_unit
+            end
+
+            local priority = get_breed_priority(breed.name, unit)
+            if priority > 0 then
+                n = n + 1
+                enemies[n] = {
+                    unit = unit,
+                    position = POSITION_LOOKUP[unit],
+                    priority = priority
+                }
+            end
+
+            ::next_unit::
         end
     end
 
@@ -263,17 +273,14 @@ local function are_teammates_dead()
         if player ~= local_player then
             -- Check if dead
             local peer_id = player:peer_id()
-            local is_connected = game_session_manager:connected_to_client(peer_id)
-            if is_connected and not player:unit_is_alive() then
-                print("dead")
+            if game_session_manager:connected_to_client(peer_id) and not player:unit_is_alive() then
                 return true
             end
             -- Check if hogtied
-            if player.player_unit then
-                local unit_data_extension = ScriptUnit.extension(player.player_unit, "unit_data_system")
+            if player.player_unit and ScriptUnit_has_extension(player.player_unit, "unit_data_system") then
+                local unit_data_extension = ScriptUnit_extension(player.player_unit, "unit_data_system")
                 local character_state_component = unit_data_extension:read_component("character_state")
-                if character_state_component.state_name == "hogtied" then
-                    print("hogtied")
+                if character_state_component and character_state_component.state_name == "hogtied" then
                     return true
                 end
             end
@@ -286,14 +293,12 @@ end
 local function auto_aim_priority_targets(player_unit)
     local player = Managers.player:local_player(1)
     if not player or not player.player_unit then
+        has_target = false
         return
     end
 
     -- Check if disable is enabled when teammates are dead
-    local disable_when_teammates_dead = mod:get("disable_aimbot_when_teammates_are_dead")
-    local teammates_are_dead = are_teammates_dead()
-
-    if disable_when_teammates_dead and teammates_are_dead then
+    if mod:get("disable_aimbot_when_teammates_are_dead") and are_teammates_dead() then
         has_target = false
         return
     end
@@ -305,8 +310,7 @@ local function auto_aim_priority_targets(player_unit)
     local camera_forward, min_dot
     local fov_check_enabled = mod:get("enable_fov_check")
     if fov_check_enabled then
-        local first_person_rot = first_person_component.rotation
-        camera_forward = Quaternion.forward(first_person_rot)
+        camera_forward = Quaternion.forward(first_person_component.rotation)
         min_dot = math_cos(math_rad(mod:get("fov_angle") * 0.5))
     end
 
@@ -330,9 +334,16 @@ local function get_weapon_fire_mode(weapon_template, is_ads)
         return "full_auto"
     end
 
-    local shoot_action = is_ads and
-        (weapon_template.actions.action_shoot_zoomed or weapon_template.actions.action_zoom_shoot_charged or weapon_template.actions.action_shoot_zoomed_start) or
-        (weapon_template.actions.action_shoot_hip or weapon_template.actions.action_shoot_hip_charged or weapon_template.actions.action_shoot_hip_start)
+    local shoot_action
+    if is_ads then
+        shoot_action = weapon_template.actions.action_shoot_zoomed or
+                       weapon_template.actions.action_zoom_shoot_charged or
+                       weapon_template.actions.action_shoot_zoomed_start
+    else
+        shoot_action = weapon_template.actions.action_shoot_hip or
+                       weapon_template.actions.action_shoot_hip_charged or
+                       weapon_template.actions.action_shoot_hip_start
+    end
 
     if not shoot_action then
         return "full_auto"
@@ -342,20 +353,16 @@ local function get_weapon_fire_mode(weapon_template, is_ads)
         return "charge"
     end
 
-    local input_check = is_ads and
-        (weapon_template.action_inputs and weapon_template.action_inputs.zoom_shoot) or
-        (weapon_template.action_inputs and weapon_template.action_inputs.shoot_pressed)
-
-    if input_check then
-        for _, input_seq in ipairs(input_check.input_sequence or {}) do
-            if input_seq.input and (input_seq.input == "action_one_pressed" or input_seq.input:find("_pressed")) then
-                return "semi_auto"
+    local action_inputs = weapon_template.action_inputs
+    if action_inputs then
+        local input_check = is_ads and action_inputs.zoom_shoot or action_inputs.shoot_pressed
+        if input_check and input_check.input_sequence then
+            for _, input_seq in ipairs(input_check.input_sequence) do
+                if input_seq.input and (input_seq.input == "action_one_pressed" or input_seq.input:find("_pressed")) then
+                    return "semi_auto"
+                end
             end
         end
-    end
-
-    if shoot_action.stop_input == "shoot_release" and shoot_action.total_time == math.huge then
-        return "full_auto"
     end
 
     return "full_auto"
@@ -423,40 +430,40 @@ local function is_reticle_on_enemy()
     local action_component = unit_data_ext:read_component("weapon_action")
 
     local ray_rotation = shooting_rot
+    local max_distance = 150
 
-    -- Apply recoil and sway like action_shoot.lua does
-    local recoil_component = unit_data_ext:read_component("recoil")
-    local sway_component = unit_data_ext:read_component("sway")
-    local movement_state_component = unit_data_ext:read_component("movement_state")
-
-    if action_component and recoil_component and sway_component and movement_state_component then
+    if action_component then
         local weapon_template = WeaponTemplate.current_weapon_template(action_component)
         if weapon_template then
-            local weapon_extension = ScriptUnit_extension(player.player_unit, "weapon_system")
-            if weapon_extension then
-                local recoil_template = weapon_extension:recoil_template()
-                local sway_template = weapon_extension:sway_template()
+            -- Apply recoil and sway like action_shoot.lua does
+            local recoil_component = unit_data_ext:read_component("recoil")
+            local sway_component = unit_data_ext:read_component("sway")
+            local movement_state_component = unit_data_ext:read_component("movement_state")
 
-                if recoil_template then
-                    ray_rotation = Recoil.apply_weapon_recoil_rotation(recoil_template, recoil_component, movement_state_component, ray_rotation)
-                end
+            if recoil_component and sway_component and movement_state_component then
+                local weapon_extension = ScriptUnit_extension(player.player_unit, "weapon_system")
+                if weapon_extension then
+                    local recoil_template = weapon_extension:recoil_template()
+                    local sway_template = weapon_extension:sway_template()
 
-                if sway_template then
-                    ray_rotation = Sway.apply_sway_rotation(sway_template, sway_component, movement_state_component, ray_rotation)
+                    if recoil_template then
+                        ray_rotation = Recoil.apply_weapon_recoil_rotation(recoil_template, recoil_component, movement_state_component, ray_rotation)
+                    end
+
+                    if sway_template then
+                        ray_rotation = Sway.apply_sway_rotation(sway_template, sway_component, movement_state_component, ray_rotation)
+                    end
                 end
+            end
+
+            -- Get max distance from weapon template
+            if weapon_template.hit_scan_template and weapon_template.hit_scan_template.range then
+                max_distance = weapon_template.hit_scan_template.range
             end
         end
     end
 
     local direction = Quaternion.forward(ray_rotation)
-    local max_distance = 150
-
-    if action_component then
-        local weapon_template = WeaponTemplate.current_weapon_template(action_component)
-        if weapon_template and weapon_template.hit_scan_template and weapon_template.hit_scan_template.range then
-            max_distance = weapon_template.hit_scan_template.range
-        end
-    end
 
     local physics_world = World.physics_world(Application.main_world())
     local hits = HitScan.raycast(physics_world, shooting_pos, direction, max_distance, nil, "filter_player_character_shooting_raycast_dynamics", 0, true, player, false)
@@ -538,15 +545,16 @@ mod.toggle_triggerbot = function(is_pressed)
 end
 
 local _get = function(self, input_service, action_name)
-    local is_fire_input = (action_name == "action_one_hold" or action_name == "action_one_pressed") and input_service.type == "Ingame"
+    if input_service.type ~= "Ingame" or not mod:get("enable_triggerbot") then
+        return self(input_service, action_name)
+    end
 
-    if not is_fire_input or not mod:get("enable_triggerbot") then
+    if action_name ~= "action_one_hold" and action_name ~= "action_one_pressed" then
         return self(input_service, action_name)
     end
 
     local keybind = mod:get("triggerbot_keybind")
-    local has_keybind = next(keybind) ~= nil
-    if has_keybind and not triggerbot_pressed then
+    if next(keybind) and not triggerbot_pressed then
         return self(input_service, action_name)
     end
 
@@ -555,22 +563,23 @@ local _get = function(self, input_service, action_name)
     end
 
     local can_fire = mod:get("triggerbot_use_raycast") and is_reticle_on_enemy() or has_target
+    if not can_fire then
+        return self(input_service, action_name)
+    end
 
-    if can_fire then
-        local weapon_template, fire_mode = get_current_weapon_info()
+    local weapon_template, fire_mode = get_current_weapon_info()
+    if action_name == "action_one_hold" and (fire_mode == "charge" or fire_mode == "full_auto") then
+        return true
+    end
 
-        if (fire_mode == "charge" or fire_mode == "full_auto") and action_name == "action_one_hold" then
+    if action_name == "action_one_pressed" and fire_mode == "semi_auto" then
+        -- For semi-auto weapons, fire once per latency cycle to avoid sending too many fire events
+        local fire_interval, current_time = get_fire_interval()
+        if current_time - last_semi_auto_fire_time >= fire_interval then
+            last_semi_auto_fire_time = current_time
             return true
-        elseif fire_mode == "semi_auto" and action_name == "action_one_pressed" then
-            -- For semi-auto weapons, fire once per latency cycle to avoid sending too many fire events
-            local fire_interval, current_time = get_fire_interval()
-
-            if current_time - last_semi_auto_fire_time >= fire_interval then
-                last_semi_auto_fire_time = current_time
-                return true
-            end
-            return false
         end
+        return false
     end
 
     return self(input_service, action_name)
