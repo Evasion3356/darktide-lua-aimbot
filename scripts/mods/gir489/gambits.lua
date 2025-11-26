@@ -216,17 +216,10 @@ local function look_at_enemy_head(enemy_unit, player, shooting_pos, player_unit)
 
     -- Apply recoil and sway like the weapon does
     local unit_data_ext = ScriptUnit_extension(player_unit, "unit_data_system")
-    local weapon_extension = ScriptUnit_extension(player_unit, "weapon_system")
-    local recoil_template = weapon_extension:recoil_template()
     local recoil_component = unit_data_ext:read_component("recoil")
     local sway_component = unit_data_ext:read_component("sway")
-    local movement_state_component = unit_data_ext:read_component("movement_state")
 
-    local recoil_pitch, recoil_yaw = Recoil.weapon_offset(recoil_template, recoil_component, movement_state_component)
-    local sway_yaw = sway_component.offset_x
-    local sway_pitch = sway_component.offset_y
-
-    player:set_orientation(base_yaw - recoil_yaw - sway_yaw, base_pitch - recoil_pitch - sway_pitch, 0)
+    player:set_orientation(base_yaw - recoil_component.yaw_offset - sway_component.offset_x, base_pitch - recoil_component.pitch_offset - sway_component.offset_y, 0)
 end
 
 local function get_fire_interval()
@@ -271,13 +264,14 @@ local function are_teammates_dead()
             if not player:unit_is_alive() then
                 return true
             end
-			-- Check if hogtied
+            -- Check if hogtied
             if ScriptUnit_has_extension(player.player_unit, "character_state") then
-				local unit_data = ScriptUnit.extension(player.player_unit, "unit_data_system")
-				local character_state_component = unit_data:read_component("character_state")
-				if character_state_component.state_name == "hogtied" then
-					return true
-				end
+                local unit_data = ScriptUnit.extension(player.player_unit, "unit_data_system")
+                local character_state_component = unit_data:read_component("character_state")
+                if character_state_component.state_name == "hogtied" then
+                    print("hogtied")
+                    return true
+                end
             end
         end
     end
@@ -412,7 +406,7 @@ local function is_main_weapon_equipped()
     return wielded_slot == "slot_secondary"
 end
 
-local function is_crosshair_on_enemy()
+local function is_reticle_on_enemy()
     local player = Managers.player:local_player(1)
     if not player or not player.player_unit then
         return false
@@ -424,8 +418,31 @@ local function is_crosshair_on_enemy()
     local shooting_rot = first_person_component.rotation
     local action_component = unit_data_ext:read_component("weapon_action")
 
-    -- Use clean first_person component for triggerbot raycast
     local ray_rotation = shooting_rot
+
+    -- Apply recoil and sway like action_shoot.lua does
+    local recoil_component = unit_data_ext:read_component("recoil")
+    local sway_component = unit_data_ext:read_component("sway")
+    local movement_state_component = unit_data_ext:read_component("movement_state")
+
+    if action_component and recoil_component and sway_component and movement_state_component then
+        local weapon_template = WeaponTemplate.current_weapon_template(action_component)
+        if weapon_template then
+            local weapon_extension = ScriptUnit_extension(player.player_unit, "weapon_system")
+            if weapon_extension then
+                local recoil_template = weapon_extension:recoil_template()
+                local sway_template = weapon_extension:sway_template()
+
+                if recoil_template then
+                    ray_rotation = Recoil.apply_weapon_recoil_rotation(recoil_template, recoil_component, movement_state_component, ray_rotation)
+                end
+
+                if sway_template then
+                    ray_rotation = Sway.apply_sway_rotation(sway_template, sway_component, movement_state_component, ray_rotation)
+                end
+            end
+        end
+    end
 
     local direction = Quaternion.forward(ray_rotation)
     local max_distance = 150
@@ -533,7 +550,7 @@ local _get = function(self, input_service, action_name)
         return self(input_service, action_name)
     end
 
-    local can_fire = mod:get("triggerbot_use_raycast") and is_crosshair_on_enemy() or has_target
+    local can_fire = mod:get("triggerbot_use_raycast") and is_reticle_on_enemy() or has_target
 
     if can_fire then
         local weapon_template, fire_mode = get_current_weapon_info()
