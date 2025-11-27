@@ -1,4 +1,4 @@
-local mod = get_mod("darktide-lua-aimbot")
+local mod = get_mod("darktide-lua-gambits")
 local HitZone = require("scripts/utilities/attack/hit_zone")
 local Breed = require("scripts/utilities/breed")
 local HitScan = require("scripts/utilities/attack/hit_scan")
@@ -13,6 +13,53 @@ local triggerbot_pressed = false
 local has_target = false
 local last_semi_auto_fire_time = 0
 
+local BREED_PRIORITY_MAP = {
+    -- Hound
+    chaos_hound = "target_hounds", --Pox Hound
+    chaos_hound_mutator = "target_hounds", --Pox Hound
+    -- Boss Enemies
+    chaos_beast_of_nurgle = "target_bosses", --Beast of Nurgle
+    chaos_plague_ogryn = "target_bosses", --Plague Ogyrn
+    chaos_spawn = "target_bosses", --Chaos Spawn
+    cultist_captain = "target_bosses", --Admontion Champion
+    renegade_captain = "target_bosses", --Scab Captain
+    renegade_twin_captain = "target_bosses", --Rodin Karnak
+    renegade_twin_captain_two = "target_bosses", --Rinda Karnak
+    chaos_daemonhost = "target_bosses", --Daemonhost (with special check below)
+    chaos_mutator_daemonhost = "target_bosses", --Daemonhost (with special check below)
+    -- Trappers
+    renegade_netgunner = "target_netgunners", --Trapper
+    -- Flamers
+    cultist_flamer = "target_flamers", --Dreg Tox Flamer
+    renegade_flamer = "target_flamers", --Scab Flamer
+    renegade_flamer_mutator = "target_flamers", --Scab Flamer
+    -- Sniper
+    renegade_sniper = "target_snipers", --Sniper
+    -- Bombers
+    chaos_poxwalker_bomber = "target_bombers", --Poxburster
+    cultist_grenadier = "target_bombers", --Dreg Tox Bomber
+    renegade_grenadier = "target_bombers", --Scab Bomber
+    -- Gunners
+    cultist_shocktrooper = "target_gunners", --Dreg Shotgunner
+    cultist_gunner = "target_gunners", --Dreg Gunner
+    renegade_gunner = "target_gunners", --Scab Gunner
+    renegade_plasma_gunner = "target_gunners", --Scab Plasmer Gunner
+    renegade_shocktrooper = "target_gunners", --Scab Shotgunner
+    -- Ragers
+    cultist_berzerker = "target_berzerkers", --Dreg Rager
+    renegade_berzerker = "target_berzerkers", --Scab Rager
+    -- Mauler
+    renegade_executor = "target_mauler", --Scab Mauler
+    -- Mutants
+    cultist_mutant = "target_mutants", --Mutant
+    cultist_mutant_mutator = "target_mutants", --Mutant
+    -- Ogryns (Melee)
+    chaos_ogryn_bulwark = "target_ogryns_melee", --Bulwark
+    chaos_ogryn_executor = "target_ogryns_melee", --Crusher
+    -- Ogryn
+    chaos_ogryn_gunner = "target_ogryns" --Reaper
+}
+
 local math_rad = math.rad
 local math_cos = math.cos
 local math_atan2 = math.atan2
@@ -23,13 +70,20 @@ local Vector3_dot = Vector3.dot
 local Vector3_length = Vector3.length
 local ScriptUnit_has_extension = ScriptUnit.has_extension
 local ScriptUnit_extension = ScriptUnit.extension
+local Unit_node = Unit.node
+local Unit_world_position = Unit.world_position
+local Actor_unit = Actor.unit
+local PhysicsWorld_raycast = PhysicsWorld.raycast
+local World_physics_world = World.physics_world
+local Application_main_world = Application.main_world
+local Quaternion_forward = Quaternion.forward
 
 local function get_daemonhost_priority(unit, priority)
     local game_object_id = Managers.state.unit_spawner:game_object_id(unit)
     if game_object_id then
        local game_session = Managers.state.game_session:game_session()
        local stage = GameSession.game_object_field(game_session, game_object_id, "stage")
-       if stage ~= 6 then --DAEMONHOST_AGGROED_STAGE
+       if stage == 6 then --DAEMONHOST_AGGROED_STAGE
            return priority
        end
     end
@@ -37,54 +91,7 @@ local function get_daemonhost_priority(unit, priority)
 end
 
 local function get_breed_priority(breed_name, unit)
-    local priority_map = {
-        -- Hound
-        chaos_hound = "target_hounds", --Pox Hound
-        chaos_hound_mutator = "target_hounds", --Pox Hound
-        -- Boss Enemies
-        chaos_beast_of_nurgle = "target_bosses", --Beast of Nurgle
-        chaos_plague_ogryn = "target_bosses", --Plague Ogyrn
-        chaos_spawn = "target_bosses", --Chaos Spawn
-        cultist_captain = "target_bosses", --Admontion Champion
-        renegade_captain = "target_bosses", --Scab Captain
-        renegade_twin_captain = "target_bosses", --Rodin Karnak
-        renegade_twin_captain_two = "target_bosses", --Rinda Karnak
-        chaos_daemonhost = "target_bosses", --Daemonhost (with special check below)
-        chaos_mutator_daemonhost = "target_bosses", --Daemonhost (with special check below)
-        -- Trappers
-        renegade_netgunner = "target_netgunners", --Trapper
-        -- Flamers
-        cultist_flamer = "target_flamers", --Dreg Tox Flamer
-        renegade_flamer = "target_flamers", --Scab Flamer
-        renegade_flamer_mutator = "target_flamers", --Scab Flamer
-        -- Sniper
-        renegade_sniper = "target_snipers", --Sniper
-        -- Bombers
-        chaos_poxwalker_bomber = "target_bombers", --Poxburster
-        cultist_grenadier = "target_bombers", --Dreg Tox Bomber
-        renegade_grenadier = "target_bombers", --Scab Bomber
-        -- Gunners
-        cultist_shocktrooper = "target_gunners", --Dreg Shotgunner
-        cultist_gunner = "target_gunners", --Dreg Gunner
-        renegade_gunner = "target_gunners", --Scab Gunner
-        renegade_plasma_gunner = "target_gunners", --Scab Plasmer Gunner
-        renegade_shocktrooper = "target_gunners", --Scab Shotgunner
-        -- Ragers
-        cultist_berzerker = "target_berzerkers", --Dreg Rager
-        renegade_berzerker = "target_berzerkers", --Scab Rager
-        -- Mauler
-        renegade_executor = "target_mauler", --Scab Mauler
-        -- Mutants
-        cultist_mutant = "target_mutants", --Mutant
-        cultist_mutant_mutator = "target_mutants", --Mutant
-        -- Ogryns (Melee)
-        chaos_ogryn_bulwark = "target_ogryns_melee", --Bulwark
-        chaos_ogryn_executor = "target_ogryns_melee", --Crusher
-        -- Ogryn
-        chaos_ogryn_gunner = "target_ogryns" --Reaper
-    }
-
-    local setting_key = priority_map[breed_name]
+    local setting_key = BREED_PRIORITY_MAP[breed_name]
     local priority = setting_key and mod:get(setting_key) or 0
     local is_daemonhost = breed_name == "chaos_daemonhost" or breed_name == "chaos_mutator_daemonhost"
 
@@ -115,21 +122,31 @@ local function get_all_enemies()
     for unit, _ in pairs(entities) do
         if ScriptUnit_has_extension(unit, "health_system") then
             local health_ext = ScriptUnit_extension(unit, "health_system")
-            if health_ext:is_alive() and ScriptUnit_has_extension(unit, "unit_data_system") then
-                local unit_data_ext = ScriptUnit_extension(unit, "unit_data_system")
-                local breed = unit_data_ext:breed()
-                if breed and breed.breed_type ~= "player" and not breed.name:find("hazard") then
-                    local priority = get_breed_priority(breed.name, unit)
-                    if priority > 0 then
-                        n = n + 1
-                        enemies[n] = {
-                            unit = unit,
-                            position = POSITION_LOOKUP[unit],
-                            priority = priority
-                        }
-                    end
-                end
+            if not health_ext:is_alive() then
+                goto next_unit
             end
+
+            if not ScriptUnit_has_extension(unit, "unit_data_system") then
+                goto next_unit
+            end
+
+            local unit_data_ext = ScriptUnit_extension(unit, "unit_data_system")
+            local breed = unit_data_ext:breed()
+            if not breed or breed.breed_type == "player" or (breed.name and breed.name:find("hazard")) then
+                goto next_unit
+            end
+
+            local priority = get_breed_priority(breed.name, unit)
+            if priority > 0 then
+                n = n + 1
+                enemies[n] = {
+                    unit = unit,
+                    position = POSITION_LOOKUP[unit],
+                    priority = priority
+                }
+            end
+
+            ::next_unit::
         end
     end
 
@@ -141,16 +158,16 @@ local function get_all_enemies()
 end
 
 local function is_in_fov(enemy_unit, camera_pos, camera_forward, min_dot)
-    local head_node = Unit.node(enemy_unit, "j_head")
+    local head_node = Unit_node(enemy_unit, "j_head")
     if not head_node then
         return false
     end
-    local head_pos = Unit.world_position(enemy_unit, head_node)
+    local head_pos = Unit_world_position(enemy_unit, head_node)
     return Vector3_dot(camera_forward, Vector3_normalize(head_pos - camera_pos)) >= min_dot
 end
 
 local function can_see_head(enemy_unit, player)
-    local head_node = Unit.node(enemy_unit, "j_head")
+    local head_node = Unit_node(enemy_unit, "j_head")
     if not head_node then
         return false
     end
@@ -158,12 +175,12 @@ local function can_see_head(enemy_unit, player)
     local unit_data_ext = ScriptUnit_extension(player.player_unit, "unit_data_system")
     local shooting_pos = unit_data_ext:read_component("first_person").position
 
-    local head_pos = Unit.world_position(enemy_unit, head_node)
+    local head_pos = Unit_world_position(enemy_unit, head_node)
     local dir = head_pos - shooting_pos
     local dist = Vector3_length(dir)
     dir = Vector3_normalize(dir)
 
-    local physics_world = World.physics_world(Application.main_world())
+    local physics_world = World_physics_world(Application_main_world())
     local hits_dynamics = HitScan.raycast(physics_world, shooting_pos, dir, dist, nil, "filter_player_character_shooting_raycast_dynamics", 0, true, player, false)
 
     local target_head_hit = nil
@@ -172,7 +189,7 @@ local function can_see_head(enemy_unit, player)
             local hit = hits_dynamics[i]
             local actor = hit.actor or hit[4]
             if actor then
-                local unit = Actor.unit(actor)
+                local unit = Actor_unit(actor)
                 if unit == enemy_unit then
                     local zone_name = HitZone.get_name(unit, actor)
                     if zone_name == HitZone.hit_zone_names.shield then
@@ -190,7 +207,7 @@ local function can_see_head(enemy_unit, player)
         return false
     end
 
-    local hits_statics = PhysicsWorld.raycast(physics_world, shooting_pos, dir, dist, "all", "types", "statics", "max_hits", 256, "collision_filter", "filter_player_character_shooting_raycast_statics")
+    local hits_statics = PhysicsWorld_raycast(physics_world, shooting_pos, dir, dist, "all", "types", "statics", "max_hits", 256, "collision_filter", "filter_player_character_shooting_raycast_statics")
 
     if hits_statics and #hits_statics > 0 then
         local wall_distance = hits_statics[1].distance or hits_statics[1][2] or math_huge
@@ -202,14 +219,24 @@ local function can_see_head(enemy_unit, player)
     return true
 end
 
-local function look_at_enemy_head(enemy_unit, player, camera_pos, recoil_pitch, recoil_yaw)
-    local head_node = Unit.node(enemy_unit, "j_head")
+local function look_at_enemy_head(enemy_unit, player, shooting_pos, player_unit)
+    local head_node = Unit_node(enemy_unit, "j_head")
     if not head_node then
         return
     end
-    local head_pos = Unit.world_position(enemy_unit, head_node)
-    local dir = Vector3_normalize(head_pos - camera_pos)
-    player:set_orientation(math_atan2(dir.y, dir.x) - HALF_PI - recoil_yaw, math_asin(dir.z) - recoil_pitch, 0)
+    local head_pos = Unit_world_position(enemy_unit, head_node)
+    local dir = Vector3_normalize(head_pos - shooting_pos)
+
+    -- Get base orientation without recoil
+    local base_pitch = math_asin(dir.z)
+    local base_yaw = math_atan2(dir.y, dir.x) - HALF_PI
+
+    -- Apply recoil and sway like the weapon does
+    local unit_data_ext = ScriptUnit_extension(player_unit, "unit_data_system")
+    local recoil_component = unit_data_ext:read_component("recoil")
+    local sway_component = unit_data_ext:read_component("sway")
+
+    player:set_orientation(base_yaw - recoil_component.yaw_offset - sway_component.offset_x, base_pitch - recoil_component.pitch_offset - sway_component.offset_y, 0)
 end
 
 local function get_fire_interval()
@@ -241,31 +268,66 @@ local function get_fire_interval()
     return fire_interval, current_time
 end
 
+local function are_teammates_dead()
+    local local_player = Managers.player:local_player(1)
+    if not local_player or not local_player.player_unit then
+        return false
+    end
+
+    local human_players = Managers.player:human_players()
+    local game_session_manager = Managers.state.game_session
+    for _, player in pairs(human_players) do
+        if player ~= local_player then
+            -- Check if dead
+            local peer_id = player:peer_id()
+            if game_session_manager:connected_to_client(peer_id) and not player:unit_is_alive() then
+                return true
+            end
+            -- Check if hogtied
+            if player.player_unit and ScriptUnit_has_extension(player.player_unit, "unit_data_system") then
+                local unit_data_extension = ScriptUnit_extension(player.player_unit, "unit_data_system")
+                local character_state_component = unit_data_extension:read_component("character_state")
+                if character_state_component and character_state_component.state_name == "hogtied" then
+                    return true
+                end
+            end
+        end
+    end
+
+    return false
+end
+
 local function auto_aim_priority_targets(player_unit)
     local player = Managers.player:local_player(1)
     if not player or not player.player_unit then
+        has_target = false
         return
     end
 
-    local camera_pos = Managers.state.camera:camera_position(player.viewport_name)
+    -- Check if disable is enabled when teammates are dead
+    if mod:get("disable_when_teammates_are_dead") and are_teammates_dead() then
+        has_target = false
+        return
+    end
+
     local unit_data_ext = ScriptUnit_extension(player_unit, "unit_data_system")
-    local recoil_component = unit_data_ext:read_component("recoil")
+    local first_person_component = unit_data_ext:read_component("first_person")
+    local shooting_pos = first_person_component.position
 
     local camera_forward, min_dot
     local fov_check_enabled = mod:get("enable_fov_check")
     if fov_check_enabled then
-        local camera_rot = Managers.state.camera:camera_rotation(player.viewport_name)
-        camera_forward = Quaternion.forward(camera_rot)
+        camera_forward = Quaternion_forward(first_person_component.rotation)
         min_dot = math_cos(math_rad(mod:get("fov_angle") * 0.5))
     end
 
     local enemies = get_all_enemies()
     for i = 1, #enemies do
         local enemy = enemies[i]
-        if not fov_check_enabled or is_in_fov(enemy.unit, camera_pos, camera_forward, min_dot) then
+        if not fov_check_enabled or is_in_fov(enemy.unit, shooting_pos, camera_forward, min_dot) then
             if can_see_head(enemy.unit, player) then
                 has_target = true
-                look_at_enemy_head(enemy.unit, player, camera_pos, recoil_component.pitch_offset, recoil_component.yaw_offset)
+                look_at_enemy_head(enemy.unit, player, shooting_pos, player_unit)
                 return
             end
         end
@@ -279,9 +341,16 @@ local function get_weapon_fire_mode(weapon_template, is_ads)
         return "full_auto"
     end
 
-    local shoot_action = is_ads and
-        (weapon_template.actions.action_shoot_zoomed or weapon_template.actions.action_zoom_shoot_charged or weapon_template.actions.action_shoot_zoomed_start) or
-        (weapon_template.actions.action_shoot_hip or weapon_template.actions.action_shoot_hip_charged or weapon_template.actions.action_shoot_hip_start)
+    local shoot_action
+    if is_ads then
+        shoot_action = weapon_template.actions.action_shoot_zoomed or
+                       weapon_template.actions.action_zoom_shoot_charged or
+                       weapon_template.actions.action_shoot_zoomed_start
+    else
+        shoot_action = weapon_template.actions.action_shoot_hip or
+                       weapon_template.actions.action_shoot_hip_charged or
+                       weapon_template.actions.action_shoot_hip_start
+    end
 
     if not shoot_action then
         return "full_auto"
@@ -291,20 +360,16 @@ local function get_weapon_fire_mode(weapon_template, is_ads)
         return "charge"
     end
 
-    local input_check = is_ads and
-        (weapon_template.action_inputs and weapon_template.action_inputs.zoom_shoot) or
-        (weapon_template.action_inputs and weapon_template.action_inputs.shoot_pressed)
-
-    if input_check then
-        for _, input_seq in ipairs(input_check.input_sequence or {}) do
-            if input_seq.input and (input_seq.input == "action_one_pressed" or input_seq.input:find("_pressed")) then
-                return "semi_auto"
+    local action_inputs = weapon_template.action_inputs
+    if action_inputs then
+        local input_check = is_ads and action_inputs.zoom_shoot or action_inputs.shoot_pressed
+        if input_check and input_check.input_sequence then
+            for _, input_seq in ipairs(input_check.input_sequence) do
+                if input_seq.input and (input_seq.input == "action_one_pressed" or input_seq.input:find("_pressed")) then
+                    return "semi_auto"
+                end
             end
         end
-    end
-
-    if shoot_action.stop_input == "shoot_release" and shoot_action.total_time == math.huge then
-        return "full_auto"
     end
 
     return "full_auto"
@@ -359,39 +424,56 @@ local function is_main_weapon_equipped()
     return wielded_slot == "slot_secondary"
 end
 
-local function is_crosshair_on_enemy()
+local function is_reticle_on_enemy()
     local player = Managers.player:local_player(1)
     if not player or not player.player_unit then
         return false
     end
 
     local unit_data_ext = ScriptUnit_extension(player.player_unit, "unit_data_system")
-    local camera_pos = Managers.state.camera:camera_position(player.viewport_name)
-    local camera_rot = Managers.state.camera:camera_rotation(player.viewport_name)
+    local first_person_component = unit_data_ext:read_component("first_person")
+    local shooting_pos = first_person_component.position
+    local shooting_rot = first_person_component.rotation
+    local action_component = unit_data_ext:read_component("weapon_action")
 
-    local weapon_extension = ScriptUnit_extension(player.player_unit, "weapon_system")
-    local recoil_template = weapon_extension:recoil_template()
-    local sway_template = weapon_extension:sway_template()
-    local movement_state_component = unit_data_ext:read_component("movement_state")
-    local recoil_component = unit_data_ext:read_component("recoil")
-    local sway_component = unit_data_ext:read_component("sway")
-
-    local ray_rotation = Recoil.apply_weapon_recoil_rotation(recoil_template, recoil_component, movement_state_component, camera_rot)
-    ray_rotation = Sway.apply_sway_rotation(sway_template, sway_component, movement_state_component, ray_rotation)
-
-    local direction = Quaternion.forward(ray_rotation)
+    local ray_rotation = shooting_rot
     local max_distance = 150
 
-    local weapon_action_component = unit_data_ext:read_component("weapon_action")
-    if weapon_action_component then
-        local weapon_template = WeaponTemplate.current_weapon_template(weapon_action_component)
-        if weapon_template and weapon_template.hit_scan_template and weapon_template.hit_scan_template.range then
-            max_distance = weapon_template.hit_scan_template.range
+    if action_component then
+        local weapon_template = WeaponTemplate.current_weapon_template(action_component)
+        if weapon_template then
+            -- Apply recoil and sway like action_shoot.lua does
+            local recoil_component = unit_data_ext:read_component("recoil")
+            local sway_component = unit_data_ext:read_component("sway")
+            local movement_state_component = unit_data_ext:read_component("movement_state")
+
+            if recoil_component and sway_component and movement_state_component then
+                local weapon_extension = ScriptUnit_extension(player.player_unit, "weapon_system")
+                if weapon_extension then
+                    local recoil_template = weapon_extension:recoil_template()
+                    local sway_template = weapon_extension:sway_template()
+
+                    if recoil_template then
+                        ray_rotation = Recoil.apply_weapon_recoil_rotation(recoil_template, recoil_component, movement_state_component, ray_rotation)
+                    end
+
+                    if sway_template then
+                        ray_rotation = Sway.apply_sway_rotation(sway_template, sway_component, movement_state_component, ray_rotation)
+                    end
+                end
+            end
+
+            -- Get max distance from weapon template
+            if weapon_template.hit_scan_template and weapon_template.hit_scan_template.range then
+                max_distance = weapon_template.hit_scan_template.range
+            end
         end
     end
 
-    local physics_world = World.physics_world(Application.main_world())
-    local hits = HitScan.raycast(physics_world, camera_pos, direction, max_distance, nil, "filter_player_character_shooting_raycast_dynamics", 0, true, player, false)
+    local direction = Quaternion_forward(ray_rotation)
+
+    local physics_world = World_physics_world(Application_main_world())
+    local hits = HitScan.raycast(physics_world, shooting_pos, direction, max_distance, nil, "filter_player_character_shooting_raycast_dynamics", 0, true, player, false)
 
     if not hits or #hits == 0 then
         return false
@@ -405,8 +487,12 @@ local function is_crosshair_on_enemy()
         if hit then
             local actor = hit.actor or hit[4]
             if actor then
-                local hit_unit = Actor.unit(actor)
-                if hit_unit and hit_unit ~= player.player_unit and ScriptUnit_has_extension(hit_unit, "health_system") then
+                local hit_unit = Actor_unit(actor)
+                -- Skip hits on the player itself
+                if hit_unit == player.player_unit then
+                    goto continue_hit_loop
+                end
+                if hit_unit and ScriptUnit_has_extension(hit_unit, "health_system") then
                     local health_ext = ScriptUnit_extension(hit_unit, "health_system")
                     if health_ext:is_alive() then
                         local breed = Breed.unit_breed_or_nil(hit_unit)
@@ -436,7 +522,7 @@ local function is_crosshair_on_enemy()
                             end
 
                             local hit_distance = hit.distance or hit[2] or 0
-                            local hits_statics = PhysicsWorld.raycast(physics_world, camera_pos, direction, max_distance, "all", "types", "statics", "max_hits", 256, "collision_filter", "filter_player_character_shooting_raycast_statics")
+                            local hits_statics = PhysicsWorld.raycast(physics_world, shooting_pos, direction, max_distance, "all", "types", "statics", "max_hits", 256, "collision_filter", "filter_player_character_shooting_raycast_statics")
                             if hits_statics and #hits_statics > 0 then
                                 local wall_distance = hits_statics[1].distance or hits_statics[1][2] or math_huge
                                 if wall_distance < hit_distance then
@@ -466,15 +552,16 @@ mod.toggle_triggerbot = function(is_pressed)
 end
 
 local _get = function(self, input_service, action_name)
-    local is_fire_input = (action_name == "action_one_hold" or action_name == "action_one_pressed") and input_service.type == "Ingame"
+    if input_service.type ~= "Ingame" or not mod:get("enable_triggerbot") then
+        return self(input_service, action_name)
+    end
 
-    if not is_fire_input or not mod:get("enable_triggerbot") then
+    if action_name ~= "action_one_hold" and action_name ~= "action_one_pressed" then
         return self(input_service, action_name)
     end
 
     local keybind = mod:get("triggerbot_keybind")
-    local has_keybind = next(keybind) ~= nil
-    if has_keybind and not triggerbot_pressed then
+    if next(keybind) and not triggerbot_pressed then
         return self(input_service, action_name)
     end
 
@@ -482,23 +569,24 @@ local _get = function(self, input_service, action_name)
         return self(input_service, action_name)
     end
 
-    local can_fire = mod:get("triggerbot_use_raycast") and is_crosshair_on_enemy() or has_target
+    local can_fire = (mod:get("triggerbot_use_raycast") and is_reticle_on_enemy()) or has_target
+    if not can_fire then
+        return self(input_service, action_name)
+    end
 
-    if can_fire then
-        local weapon_template, fire_mode = get_current_weapon_info()
+    local weapon_template, fire_mode = get_current_weapon_info()
+    if action_name == "action_one_hold" and (fire_mode == "charge" or fire_mode == "full_auto") then
+        return true
+    end
 
-        if (fire_mode == "charge" or fire_mode == "full_auto") and action_name == "action_one_hold" then
+    if action_name == "action_one_pressed" and fire_mode == "semi_auto" then
+        -- For semi-auto weapons, fire once per latency cycle to avoid sending too many fire events
+        local fire_interval, current_time = get_fire_interval()
+        if current_time - last_semi_auto_fire_time >= fire_interval then
+            last_semi_auto_fire_time = current_time
             return true
-        elseif fire_mode == "semi_auto" and action_name == "action_one_pressed" then
-            -- For semi-auto weapons, fire once per latency cycle to avoid sending too many fire events
-            local fire_interval, current_time = get_fire_interval()
-
-            if current_time - last_semi_auto_fire_time >= fire_interval then
-                last_semi_auto_fire_time = current_time
-                return true
-            end
-            return false
         end
+        return false
     end
 
     return self(input_service, action_name)

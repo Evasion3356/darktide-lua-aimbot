@@ -1,4 +1,4 @@
-local mod = get_mod("darktide-lua-aimbot")
+local mod = get_mod("darktide-lua-gambits")
 
 local priority_options = {
     {
@@ -80,6 +80,12 @@ return {
                         keybind_trigger = "held",
                         keybind_type = "function_call",
                         function_name = "toggle_aim"
+                    },
+                    {
+                        setting_id = "disable_when_teammates_are_dead",
+                        type = "checkbox",
+                        default_value = true,
+                        localize = true
                     }
                 }
             },
