@@ -120,15 +120,15 @@ local loc = {
         ru = "Если включено, автонаведение активируется при удержании ПКМ. Если выключено — используется пользовательская клавиша.",
         de = "Wenn aktiviert, wird Auto-Zielen beim Halten von Mouse2 (Rechtsklick) ausgelöst. Wenn deaktiviert, wird die benutzerdefinierte Taste verwendet."
     },
-    disable_aimbot_when_teammates_are_dead = {
-        en = "Disable Aimbot When Teammates Are Dead",
-        ru = "Отключить аимбот, когда товарищи мертвы",
-        de = "Aimbot deaktivieren, wenn Teamkollegen tot sind"
+    disable_when_teammates_are_dead = {
+        en = "Disable auto-aim When Teammates Are Dead",
+        ru = "Отключить автонаведение, когда товарищи по команде мертвы",
+        de = "Auto-Zielen deaktivieren, wenn Teammitglieder tot sind"
     },
-    disable_aimbot_when_teammates_are_dead_description = {
-        en = "If enabled, aimbot will be disabled when any teammate is dead.",
-        ru = "Если включено, аимбот будет отключен, когда любой товарищ мертв.",
-        de = "Wenn aktiviert, wird der Aimbot deaktiviert, wenn ein Teamkollege tot ist."
+    disable_when_teammates_are_dead_description = {
+        en = "If enabled, auto-aim will be disabled when any teammate is dead.",
+        ru = "Если включено, автонаведение будет отключено, когда любой товарищ",
+        de = "Wenn aktiviert, wird das Auto-Zielen deaktiviert, wenn ein Teammitglied tot ist."
     },
 
     -- Triggerbot Settings

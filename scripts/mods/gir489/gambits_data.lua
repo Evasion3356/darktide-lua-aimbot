@@ -82,7 +82,7 @@ return {
                         function_name = "toggle_aim"
                     },
                     {
-                        setting_id = "disable_aimbot_when_teammates_are_dead",
+                        setting_id = "disable_when_teammates_are_dead",
                         type = "checkbox",
                         default_value = true,
                         localize = true

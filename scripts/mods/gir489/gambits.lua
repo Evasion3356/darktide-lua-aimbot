@@ -70,6 +70,13 @@ local Vector3_dot = Vector3.dot
 local Vector3_length = Vector3.length
 local ScriptUnit_has_extension = ScriptUnit.has_extension
 local ScriptUnit_extension = ScriptUnit.extension
+local Unit_node = Unit.node
+local Unit_world_position = Unit.world_position
+local Actor_unit = Actor.unit
+local PhysicsWorld_raycast = PhysicsWorld.raycast
+local World_physics_world = World.physics_world
+local Application_main_world = Application.main_world
+local Quaternion_forward = Quaternion.forward
 
 local function get_daemonhost_priority(unit, priority)
     local game_object_id = Managers.state.unit_spawner:game_object_id(unit)
@@ -125,7 +132,7 @@ local function get_all_enemies()
 
             local unit_data_ext = ScriptUnit_extension(unit, "unit_data_system")
             local breed = unit_data_ext:breed()
-            if not breed or breed.breed_type == "player" or breed.name:find("hazard") then
+            if not breed or breed.breed_type == "player" or (breed.name and breed.name:find("hazard")) then
                 goto next_unit
             end
 
@@ -151,16 +158,16 @@ local function get_all_enemies()
 end
 
 local function is_in_fov(enemy_unit, camera_pos, camera_forward, min_dot)
-    local head_node = Unit.node(enemy_unit, "j_head")
+    local head_node = Unit_node(enemy_unit, "j_head")
     if not head_node then
         return false
     end
-    local head_pos = Unit.world_position(enemy_unit, head_node)
+    local head_pos = Unit_world_position(enemy_unit, head_node)
     return Vector3_dot(camera_forward, Vector3_normalize(head_pos - camera_pos)) >= min_dot
 end
 
 local function can_see_head(enemy_unit, player)
-    local head_node = Unit.node(enemy_unit, "j_head")
+    local head_node = Unit_node(enemy_unit, "j_head")
     if not head_node then
         return false
     end
@@ -168,12 +175,12 @@ local function can_see_head(enemy_unit, player)
     local unit_data_ext = ScriptUnit_extension(player.player_unit, "unit_data_system")
     local shooting_pos = unit_data_ext:read_component("first_person").position
 
-    local head_pos = Unit.world_position(enemy_unit, head_node)
+    local head_pos = Unit_world_position(enemy_unit, head_node)
     local dir = head_pos - shooting_pos
     local dist = Vector3_length(dir)
     dir = Vector3_normalize(dir)
 
-    local physics_world = World.physics_world(Application.main_world())
+    local physics_world = World_physics_world(Application_main_world())
     local hits_dynamics = HitScan.raycast(physics_world, shooting_pos, dir, dist, nil, "filter_player_character_shooting_raycast_dynamics", 0, true, player, false)
 
     local target_head_hit = nil
@@ -182,7 +189,7 @@ local function can_see_head(enemy_unit, player)
             local hit = hits_dynamics[i]
             local actor = hit.actor or hit[4]
             if actor then
-                local unit = Actor.unit(actor)
+                local unit = Actor_unit(actor)
                 if unit == enemy_unit then
                     local zone_name = HitZone.get_name(unit, actor)
                     if zone_name == HitZone.hit_zone_names.shield then
@@ -200,7 +207,7 @@ local function can_see_head(enemy_unit, player)
         return false
     end
 
-    local hits_statics = PhysicsWorld.raycast(physics_world, shooting_pos, dir, dist, "all", "types", "statics", "max_hits", 256, "collision_filter", "filter_player_character_shooting_raycast_statics")
+    local hits_statics = PhysicsWorld_raycast(physics_world, shooting_pos, dir, dist, "all", "types", "statics", "max_hits", 256, "collision_filter", "filter_player_character_shooting_raycast_statics")
 
     if hits_statics and #hits_statics > 0 then
         local wall_distance = hits_statics[1].distance or hits_statics[1][2] or math_huge
@@ -213,11 +220,11 @@ local function can_see_head(enemy_unit, player)
 end
 
 local function look_at_enemy_head(enemy_unit, player, shooting_pos, player_unit)
-    local head_node = Unit.node(enemy_unit, "j_head")
+    local head_node = Unit_node(enemy_unit, "j_head")
     if not head_node then
         return
     end
-    local head_pos = Unit.world_position(enemy_unit, head_node)
+    local head_pos = Unit_world_position(enemy_unit, head_node)
     local dir = Vector3_normalize(head_pos - shooting_pos)
 
     -- Get base orientation without recoil
@@ -298,7 +305,7 @@ local function auto_aim_priority_targets(player_unit)
     end
 
     -- Check if disable is enabled when teammates are dead
-    if mod:get("disable_aimbot_when_teammates_are_dead") and are_teammates_dead() then
+    if mod:get("disable_when_teammates_are_dead") and are_teammates_dead() then
         has_target = false
         return
     end
@@ -310,7 +317,7 @@ local function auto_aim_priority_targets(player_unit)
     local camera_forward, min_dot
     local fov_check_enabled = mod:get("enable_fov_check")
     if fov_check_enabled then
-        camera_forward = Quaternion.forward(first_person_component.rotation)
+        camera_forward = Quaternion_forward(first_person_component.rotation)
         min_dot = math_cos(math_rad(mod:get("fov_angle") * 0.5))
     end
 
@@ -463,9 +470,9 @@ local function is_reticle_on_enemy()
         end
     end
 
-    local direction = Quaternion.forward(ray_rotation)
+    local direction = Quaternion_forward(ray_rotation)
 
-    local physics_world = World.physics_world(Application.main_world())
+    local physics_world = World_physics_world(Application_main_world())
     local hits = HitScan.raycast(physics_world, shooting_pos, direction, max_distance, nil, "filter_player_character_shooting_raycast_dynamics", 0, true, player, false)
 
     if not hits or #hits == 0 then
@@ -480,7 +487,7 @@ local function is_reticle_on_enemy()
         if hit then
             local actor = hit.actor or hit[4]
             if actor then
-                local hit_unit = Actor.unit(actor)
+                local hit_unit = Actor_unit(actor)
                 -- Skip hits on the player itself
                 if hit_unit == player.player_unit then
                     goto continue_hit_loop
@@ -562,7 +569,7 @@ local _get = function(self, input_service, action_name)
         return self(input_service, action_name)
     end
 
-    local can_fire = mod:get("triggerbot_use_raycast") and is_reticle_on_enemy() or has_target
+    local can_fire = (mod:get("triggerbot_use_raycast") and is_reticle_on_enemy()) or has_target
     if not can_fire then
         return self(input_service, action_name)
     end
