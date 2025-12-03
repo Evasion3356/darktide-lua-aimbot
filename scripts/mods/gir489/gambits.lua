@@ -446,6 +446,8 @@ local function is_reticle_on_enemy()
             local recoil_component = unit_data_ext:read_component("recoil")
             local sway_component = unit_data_ext:read_component("sway")
             local movement_state_component = unit_data_ext:read_component("movement_state")
+            local locomotion_component = unit_data_ext:read_component("locomotion")
+            local inair_state_component = unit_data_ext:read_component("inair_state")
 
             if recoil_component and sway_component and movement_state_component then
                 local weapon_extension = ScriptUnit_extension(player.player_unit, "weapon_system")
@@ -454,11 +456,11 @@ local function is_reticle_on_enemy()
                     local sway_template = weapon_extension:sway_template()
 
                     if recoil_template then
-                        ray_rotation = Recoil.apply_weapon_recoil_rotation(recoil_template, recoil_component, movement_state_component, ray_rotation)
+                        ray_rotation = Recoil.apply_weapon_recoil_rotation(recoil_template, recoil_component, movement_state_component, locomotion_component, inair_state_component, ray_rotation)
                     end
 
                     if sway_template then
-                        ray_rotation = Sway.apply_sway_rotation(sway_template, sway_component, movement_state_component, ray_rotation)
+                        ray_rotation = Sway.apply_sway_rotation(sway_template, sway_component, ray_rotation)
                     end
                 end
             end
