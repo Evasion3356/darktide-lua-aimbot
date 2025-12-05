@@ -276,13 +276,23 @@ local loc = {
     },
     target_gunners = {
         en = "Target Gunners",
-        ru = "Наводиться на Стрелков",
+        ru = "Наводиться на Пулеметчиков",
         de = "Schützen anvisieren"
     },
     target_gunners_description = {
         en = "Automatically aim at Elite Gunner enemies.",
         ru = "Автоматически наводиться на Элитных Стрелков.",
         de = "Automatisch Elite-Schützen anvisieren."
+    },
+    target_shooters = {
+        en = "Target Basic Shooters",
+        ru = "Наводиться на Стрелков",
+        de = "Einfache Schützen anvisieren"
+    },
+    target_shooters_description = {
+        en = "Automatically aim at basic ranged enemies (Scab Shooters, Dreg Stalkers).",
+        ru = "Автоматически наводиться на обычных стрелков (Скаб-стрелки, Дрег-сталкеры).",
+        de = "Automatisch auf einfache Fernkampfgegner zielen."
     },
     target_mutants = {
         en = "Target Mutants",

@@ -45,6 +45,10 @@ local BREED_PRIORITY_MAP = {
     renegade_gunner = "target_gunners", --Scab Gunner
     renegade_plasma_gunner = "target_gunners", --Scab Plasmer Gunner
     renegade_shocktrooper = "target_gunners", --Scab Shotgunner
+    -- Basic Shooters
+    renegade_rifleman = "target_shooters", -- Scab Shooter
+    renegade_assault = "target_shooters", -- Scab Stalker
+    cultist_assault = "target_shooters", -- Dreg Stalker
     -- Ragers
     cultist_berzerker = "target_berzerkers", --Dreg Rager
     renegade_berzerker = "target_berzerkers", --Scab Rager
@@ -102,6 +106,12 @@ local function get_breed_priority(breed_name, unit)
     return priority
 end
 
+local function is_wielding_ranged(unit)
+    local visual_loadout_extension = ScriptUnit_extension(unit, "visual_loadout_system")
+    local slot_name = visual_loadout_extension:wielded_slot_name()
+    return slot_name == "slot_ranged_weapon"
+end
+
 local function get_all_enemies()
     local extension_manager = Managers.state and Managers.state.extension
     if not extension_manager then
@@ -135,8 +145,16 @@ local function get_all_enemies()
             if not breed or breed.breed_type == "player" or (breed.name and breed.name:find("hazard")) then
                 goto next_unit
             end
-
+			
+			-- Aim at school shooter only if they\them have a gun
+            local setting_key = BREED_PRIORITY_MAP[breed.name]
             local priority = get_breed_priority(breed.name, unit)
+            if priority > 0 and setting_key == "target_shooters" then
+                if not is_wielding_ranged(unit) then
+                    priority = 0
+                end
+            end
+
             if priority > 0 then
                 n = n + 1
                 enemies[n] = {
