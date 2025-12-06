@@ -79,13 +79,10 @@ local Application_main_world = Application.main_world
 local Quaternion_forward = Quaternion.forward
 
 local function get_daemonhost_priority(unit, priority)
-    local game_object_id = Managers.state.unit_spawner:game_object_id(unit)
-    if game_object_id then
-       local game_session = Managers.state.game_session:game_session()
-       local stage = GameSession.game_object_field(game_session, game_object_id, "stage")
-       if stage == 6 then --DAEMONHOST_AGGROED_STAGE
-           return priority
-       end
+    -- If it's been damaged, it's aggroed and should be targeted
+    local health_ext = ScriptUnit_extension(unit, "health_system")
+    if health_ext and health_ext:current_health_percent() < 1 then
+        return priority
     end
     return 0
 end
