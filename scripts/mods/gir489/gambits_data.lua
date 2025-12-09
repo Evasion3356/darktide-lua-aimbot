@@ -67,6 +67,12 @@ return {
                             360
                         }
                     },
+					{
+                        setting_id = "stick_to_target",
+                        type = "checkbox",
+                        default_value = false,
+                        localize = true
+                    },
                     {
                         setting_id = "use_mouse2_fallback",
                         type = "checkbox",
