@@ -13,6 +13,24 @@ local triggerbot_pressed = false
 local has_target = false
 local last_semi_auto_fire_time = 0
 local current_locked_target = nil
+local settings_cache = {}
+
+-- Settings cache
+local function get_setting_cached(setting_id)
+    local value = settings_cache[setting_id]
+
+    if value == nil then
+        value = mod:get(setting_id)
+        settings_cache[setting_id] = value
+    end
+
+    return value
+end
+
+-- Refresh cache on settings change
+function mod.on_setting_changed(setting_id)
+    settings_cache[setting_id] = mod:get(setting_id)
+end
 
 local BREED_PRIORITY_MAP = {
     -- Hound
@@ -94,7 +112,7 @@ end
 
 local function get_breed_priority(breed_name, unit)
     local setting_key = BREED_PRIORITY_MAP[breed_name]
-    local priority = setting_key and mod:get(setting_key) or 0
+    local priority = setting_key and get_setting_cached(setting_key) or 0
     local is_daemonhost = breed_name == "chaos_daemonhost" or breed_name == "chaos_mutator_daemonhost"
 
     if is_daemonhost and priority > 0 then
@@ -321,7 +339,7 @@ local function auto_aim_priority_targets(player_unit)
         return
     end
 
-    if mod:get("disable_when_teammates_are_dead") and are_teammates_dead() then
+    if get_setting_cached("disable_when_teammates_are_dead") and are_teammates_dead() then
         has_target = false
         current_locked_target = nil
         return
@@ -332,14 +350,14 @@ local function auto_aim_priority_targets(player_unit)
     local shooting_pos = first_person_component.position
 
     local camera_forward, min_dot
-    local fov_check_enabled = mod:get("enable_fov_check")
+    local fov_check_enabled = get_setting_cached("enable_fov_check")
     if fov_check_enabled then
         camera_forward = Quaternion_forward(first_person_component.rotation)
-        min_dot = math_cos(math_rad(mod:get("fov_angle") * 0.5))
+        min_dot = math_cos(math_rad(get_setting_cached("fov_angle") * 0.5))
     end
 
 	-- Stick to target 
-    if mod:get("stick_to_target") and current_locked_target then
+    if get_setting_cached("stick_to_target") and current_locked_target then
         if Unit.alive(current_locked_target) and ScriptUnit_has_extension(current_locked_target, "health_system") then
             local health_ext = ScriptUnit_extension(current_locked_target, "health_system")
             if health_ext:is_alive() then
@@ -515,8 +533,8 @@ local function is_reticle_on_enemy()
         return false
     end
 
-    local weakspot_only = mod:get("triggerbot_weakspot_only")
-    local respect_priority = mod:get("triggerbot_respect_priority")
+    local weakspot_only = get_setting_cached("triggerbot_weakspot_only")
+    local respect_priority = get_setting_cached("triggerbot_respect_priority")
 
     for i = 1, #hits do
         local hit = hits[i]
@@ -588,7 +606,7 @@ mod.toggle_triggerbot = function(is_pressed)
 end
 
 local _get = function(self, input_service, action_name)
-    if input_service.type ~= "Ingame" or not mod:get("enable_triggerbot") then
+    if input_service.type ~= "Ingame" or not get_setting_cached("enable_triggerbot") then
         return self(input_service, action_name)
     end
 
@@ -596,16 +614,16 @@ local _get = function(self, input_service, action_name)
         return self(input_service, action_name)
     end
 
-    local keybind = mod:get("triggerbot_keybind")
+    local keybind = get_setting_cached("triggerbot_keybind")
     if next(keybind) and not triggerbot_pressed then
         return self(input_service, action_name)
     end
 
-    if mod:get("require_main_weapon") and not is_main_weapon_equipped() then
+    if get_setting_cached("require_main_weapon") and not is_main_weapon_equipped() then
         return self(input_service, action_name)
     end
 
-    local can_fire = (mod:get("triggerbot_use_raycast") and is_reticle_on_enemy()) or has_target
+    local can_fire = (get_setting_cached("triggerbot_use_raycast") and is_reticle_on_enemy()) or has_target
     if not can_fire then
         return self(input_service, action_name)
     end
@@ -637,10 +655,10 @@ mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, u
         return
     end
 
-    local use_mouse2 = mod:get("use_mouse2_fallback")
+    local use_mouse2 = get_setting_cached("use_mouse2_fallback")
     local should_aim = (use_mouse2 and Mouse.button(Mouse.button_index("right")) > 0.5) or (not use_mouse2 and aim_button_pressed)
 
-    if should_aim and (not mod:get("require_main_weapon") or is_main_weapon_equipped()) then
+    if should_aim and (not get_setting_cached("require_main_weapon") or is_main_weapon_equipped()) then
         auto_aim_priority_targets(unit)
     else
         has_target = false
