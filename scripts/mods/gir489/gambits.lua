@@ -12,6 +12,7 @@ local aim_button_pressed = false
 local triggerbot_pressed = false
 local has_target = false
 local last_semi_auto_fire_time = 0
+local current_locked_target = nil
 
 local BREED_PRIORITY_MAP = {
     -- Hound
@@ -316,12 +317,13 @@ local function auto_aim_priority_targets(player_unit)
     local player = Managers.player:local_player(1)
     if not player or not player.player_unit then
         has_target = false
+        current_locked_target = nil
         return
     end
 
-    -- Check if disable is enabled when teammates are dead
     if mod:get("disable_when_teammates_are_dead") and are_teammates_dead() then
         has_target = false
+        current_locked_target = nil
         return
     end
 
@@ -336,12 +338,28 @@ local function auto_aim_priority_targets(player_unit)
         min_dot = math_cos(math_rad(mod:get("fov_angle") * 0.5))
     end
 
+	-- Stick to target 
+    if mod:get("stick_to_target") and current_locked_target then
+        if Unit.alive(current_locked_target) and ScriptUnit_has_extension(current_locked_target, "health_system") then
+            local health_ext = ScriptUnit_extension(current_locked_target, "health_system")
+            if health_ext:is_alive() then
+                if can_see_head(current_locked_target, player) then
+                    has_target = true
+                    look_at_enemy_head(current_locked_target, player, shooting_pos, player_unit)
+                    return
+                end
+            end
+        end
+        current_locked_target = nil
+    end
+
     local enemies = get_all_enemies()
     for i = 1, #enemies do
         local enemy = enemies[i]
         if not fov_check_enabled or is_in_fov(enemy.unit, shooting_pos, camera_forward, min_dot) then
             if can_see_head(enemy.unit, player) then
                 has_target = true
+                current_locked_target = enemy.unit
                 look_at_enemy_head(enemy.unit, player, shooting_pos, player_unit)
                 return
             end
@@ -349,6 +367,7 @@ local function auto_aim_priority_targets(player_unit)
     end
 
     has_target = false
+    current_locked_target = nil
 end
 
 local function get_weapon_fire_mode(weapon_template, is_ads)
@@ -625,5 +644,6 @@ mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, u
         auto_aim_priority_targets(unit)
     else
         has_target = false
+        current_locked_target = nil
     end
 end)

@@ -130,6 +130,16 @@ local loc = {
         ru = "Если включено, автонаведение будет отключено, когда любой товарищ",
         de = "Wenn aktiviert, wird das Auto-Zielen deaktiviert, wenn ein Teammitglied tot ist."
     },
+	stick_to_target = {
+        en = "Stick to Target",
+        ru = "Удерживать захваченную цель",
+        de = "Ziel beibehalten"
+    },
+    stick_to_target_description = {
+        en = "Once locked, do not switch targets until the enemy dies or the aim key is released.",
+        ru = "После захвата цель не будет меняться, пока враг не умрет или вы не отпустите кнопку прицеливания.",
+        de = "Sobald ein Ziel erfasst ist, nicht wechseln, bis der Feind stirbt oder die Zieltaste losgelassen wird."
+    },
 
     -- Triggerbot Settings
     triggerbot_settings = {
