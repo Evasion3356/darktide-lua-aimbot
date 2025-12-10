@@ -217,6 +217,18 @@ return {
                         type = "dropdown",
                         options = priority_options,
                         default_value = 3
+                    },
+                    {
+                        setting_id = "target_melee_regular",
+                        type = "dropdown",
+                        options = priority_options,
+                        default_value = 0
+                    },
+                    {
+                        setting_id = "target_ranged_regular",
+                        type = "dropdown",
+                        options = priority_options,
+                        default_value = 0
                     }
                 }
             },
