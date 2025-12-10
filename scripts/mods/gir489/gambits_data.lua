@@ -189,12 +189,6 @@ return {
                         default_value = 4
                     },
                     {
-                        setting_id = "target_shooters",
-                        type = "dropdown",
-                        options = priority_options,
-                        default_value = 1
-                    },
-                    {
                         setting_id = "target_mutants",
                         type = "dropdown",
                         options = priority_options,
@@ -228,7 +222,7 @@ return {
                         setting_id = "target_ranged_regular",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 0
+                        default_value = 1
                     }
                 }
             },

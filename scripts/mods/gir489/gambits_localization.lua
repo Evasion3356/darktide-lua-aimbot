@@ -299,11 +299,6 @@ local loc = {
         ru = "Наводиться на Стрелков",
         de = "Einfache Schützen anvisieren"
     },
-    target_shooters_description = {
-        en = "Automatically aim at basic ranged enemies (Scab Shooters, Dreg Stalkers).",
-        ru = "Автоматически наводиться на обычных стрелков (Скаб-стрелки, Дрег-сталкеры).",
-        de = "Automatisch auf einfache Fernkampfgegner zielen."
-    },
     target_mutants = {
         en = "Target Mutants",
         ru = "Наводиться на Мутантов",

@@ -64,10 +64,6 @@ local BREED_PRIORITY_MAP = {
     renegade_gunner = "target_gunners", --Scab Gunner
     renegade_plasma_gunner = "target_gunners", --Scab Plasmer Gunner
     renegade_shocktrooper = "target_gunners", --Scab Shotgunner
-    -- Basic Shooters
-    renegade_rifleman = "target_shooters", -- Scab Shooter
-    renegade_assault = "target_shooters", -- Scab Stalker
-    cultist_assault = "target_shooters", -- Dreg Stalker
     -- Ragers
     cultist_berzerker = "target_berzerkers", --Dreg Rager
     renegade_berzerker = "target_berzerkers", --Scab Rager
@@ -81,7 +77,6 @@ local BREED_PRIORITY_MAP = {
     chaos_ogryn_executor = "target_ogryns_melee", --Crusher
     -- Ogryn
     chaos_ogryn_gunner = "target_ogryns", --Reaper
-
     -- Melee (regular)
     chaos_armored_infected = "target_melee_regular", -- Amoured Groaner
     chaos_lesser_mutated_poxwalker = "target_melee_regular", -- Mutated Poxwalker
@@ -92,7 +87,6 @@ local BREED_PRIORITY_MAP = {
     cultist_melee = "target_melee_regular", -- Dreg Bruiser
     cultist_ritualist = "target_melee_regular", -- Dreg Ritualist
     renegade_melee = "target_melee_regular", -- Scab Bruiser
-
     -- Ranged (regular)
     cultist_assault = "target_ranged_regular", -- Dreg Stalker
     renegade_assault = "target_ranged_regular", -- Scab Stalker
@@ -174,7 +168,7 @@ local function get_all_enemies()
 			-- Aim at school shooter only if they\them have a gun
             local setting_key = BREED_PRIORITY_MAP[breed.name]
             local priority = get_breed_priority(breed.name, unit)
-            if priority > 0 and setting_key == "target_shooters" then
+            if priority > 0 and setting_key == "target_ranged_regular" then
                 if not is_wielding_ranged(unit) then
                     priority = 0
                 end
