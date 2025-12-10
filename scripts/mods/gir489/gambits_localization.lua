@@ -323,6 +323,26 @@ local loc = {
         en = "Automatically aim at Scab Maulers.",
         ru = "Автоматически наводиться на Скабов-Палачей.",
         de = "Automatisch Scab-Maulere anvisieren."
+    },
+    target_melee_regular = {
+        en = "Target Regular Melee Enemies",
+        ru = "Наводиться на обычных ближних врагов",
+        de = "Normale Nahkampfgegner anvisieren"
+    },
+    target_melee_regular_description = {
+        en = "Automatically aim at regular melee enemies (e.g., Chaos Cultists, Plague Zombies).",
+        ru = "Автоматически наводиться на обычных ближних врагов (например, культистов Хаоса, чумных зомби).",
+        de = "Automatisch normale Nahkampfgegner anvisieren (z.B. Chaos-Kultisten, Seuchen-Zombies)."
+    },
+    target_ranged_regular = {
+        en = "Target Regular Ranged Enemies",
+        ru = "Наводиться на обычных дальних врагов",
+        de = "Normale Fernkampfgegner anvisieren"
+    },
+    target_ranged_regular_description = {
+        en = "Automatically aim at regular ranged enemies (e.g., Plague Monks, Chaos Warriors).",
+        ru = "Автоматически наводиться на обычных дальних врагов (например, чумных монахов, воинов Хаоса).",
+        de = "Automatisch normale Fernkampfgegner anvisieren (z.B. Seuchen-Mönche, Chaos-Krieger)."
     }
 }
 

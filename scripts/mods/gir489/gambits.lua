@@ -57,7 +57,24 @@ local BREED_PRIORITY_MAP = {
     chaos_ogryn_bulwark = "target_ogryns_melee", --Bulwark
     chaos_ogryn_executor = "target_ogryns_melee", --Crusher
     -- Ogryn
-    chaos_ogryn_gunner = "target_ogryns" --Reaper
+    chaos_ogryn_gunner = "target_ogryns", --Reaper
+
+    -- Melee (regular)
+    chaos_armored_infected = "target_melee_regular", -- Amoured Groaner
+    chaos_lesser_mutated_poxwalker = "target_melee_regular", -- Mutated Poxwalker
+    chaos_mutated_poxwalker = "target_melee_regular", --Tentacled Poxwalker
+    chaos_mutator_ritualist = "target_melee_regular", -- Dreg Ritualist
+    chaos_newly_infected = "target_melee_regular", -- Groaner
+    chaos_poxwalker = "target_melee_regular", -- Poxwalker
+    cultist_melee = "target_melee_regular", -- Dreg Bruiser
+    cultist_ritualist = "target_melee_regular", -- Dreg Ritualist
+    renegade_melee = "target_melee_regular", -- Scab Bruiser
+
+    -- Ranged (regular)
+    cultist_assault = "target_ranged_regular", -- Dreg Stalker
+    renegade_assault = "target_ranged_regular", -- Scab Stalker
+    renegade_radio_operator = "target_ranged_regular", -- Scab Radio Operator
+    renegade_rifleman = "target_ranged_regular" -- Scab Shooter
 }
 
 local math_rad = math.rad
@@ -81,7 +98,7 @@ local Quaternion_forward = Quaternion.forward
 local function get_daemonhost_priority(unit, priority)
     -- If it's been damaged, it's aggroed and should be targeted
     local health_ext = ScriptUnit_extension(unit, "health_system")
-    if health_ext and health_ext:current_health_percent() < 1 then
+    if health_ext and health_ext:current_health_percent() <= 0.98 then
         return priority
     end
     return 0
@@ -117,16 +134,8 @@ local function get_all_enemies()
     local n = 0
 
     for unit, _ in pairs(entities) do
-        if ScriptUnit_has_extension(unit, "health_system") then
-            local health_ext = ScriptUnit_extension(unit, "health_system")
-            if not health_ext:is_alive() then
-                goto next_unit
-            end
-
-            if not ScriptUnit_has_extension(unit, "unit_data_system") then
-                goto next_unit
-            end
-
+        local health_extension = ScriptUnit_has_extension(unit, "health_system")
+        if health_extension and health_extension:is_alive() then
             local unit_data_ext = ScriptUnit_extension(unit, "unit_data_system")
             local breed = unit_data_ext:breed()
             if not breed or breed.breed_type == "player" or (breed.name and breed.name:find("hazard")) then
