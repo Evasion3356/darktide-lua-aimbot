@@ -196,11 +196,11 @@ local function can_see_head(enemy_unit, player)
             local actor = hit.actor or hit[4]
             if actor then
                 local unit = Actor_unit(actor)
+                local zone_name = HitZone.get_name(unit, actor)
+                if zone_name == HitZone.hit_zone_names.shield then
+                    return false
+                end
                 if unit == enemy_unit then
-                    local zone_name = HitZone.get_name(unit, actor)
-                    if zone_name == HitZone.hit_zone_names.shield then
-                        return false
-                    end
                     if zone_name == HitZone.hit_zone_names.head then
                         target_head_hit = hit.distance or hit[2] or 0
                     end
@@ -559,27 +559,27 @@ mod.toggle_triggerbot = function(is_pressed)
     triggerbot_pressed = is_pressed
 end
 
-local _get = function(self, input_service, action_name)
-    if input_service.type ~= "Ingame" or not mod:get("enable_triggerbot") then
-        return self(input_service, action_name)
+local _get = function(func, self, action_name)
+    if self.type ~= "Ingame" or not mod:get("enable_triggerbot") then
+        return func(self, action_name)
     end
 
     if action_name ~= "action_one_hold" and action_name ~= "action_one_pressed" then
-        return self(input_service, action_name)
+        return func(self, action_name)
     end
 
     local keybind = mod:get("triggerbot_keybind")
     if next(keybind) and not triggerbot_pressed then
-        return self(input_service, action_name)
+        return func(self, action_name)
     end
 
     if mod:get("require_main_weapon") and not is_main_weapon_equipped() then
-        return self(input_service, action_name)
+        return func(self, action_name)
     end
 
     local can_fire = (mod:get("triggerbot_use_raycast") and is_reticle_on_enemy()) or has_target
     if not can_fire then
-        return self(input_service, action_name)
+        return func(self, action_name)
     end
 
     local weapon_template, fire_mode = get_current_weapon_info()
@@ -597,7 +597,7 @@ local _get = function(self, input_service, action_name)
         return false
     end
 
-    return self(input_service, action_name)
+    return func(self, action_name)
 end
 
 mod:hook("InputService", "_get", _get)
