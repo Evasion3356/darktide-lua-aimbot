@@ -213,14 +213,11 @@ local function can_see_head(enemy_unit, player)
         return false
     end
 
-    local hits_statics = PhysicsWorld_raycast(physics_world, shooting_pos, dir, dist, "all", "types", "statics", "max_hits", 256, "collision_filter", "filter_player_character_shooting_raycast_statics")
+    local hit_statics, hit_pos, hit_dist = PhysicsWorld_raycast(physics_world, shooting_pos, dir, dist, "closest", "types", "statics", "collision_filter", "filter_player_character_shooting_raycast_statics")
 
-    if hits_statics and #hits_statics > 0 then
-        local wall_distance = hits_statics[1].distance or hits_statics[1][2] or math_huge
-        if wall_distance < target_head_hit then
-            return false
-        end
-    end
+	if hit_statics and hit_dist < target_head_hit then
+		return false
+	end
 
     return true
 end
