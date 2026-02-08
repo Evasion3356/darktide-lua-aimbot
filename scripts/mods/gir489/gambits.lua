@@ -113,6 +113,30 @@ local function get_daemonhost_priority(unit, priority)
     return 0
 end
 
+local POXBURSTER_EXPLOSION_RADIUS_SQ = 6 * 6 -- 6m outer explosion radius, squared
+
+local function is_poxburster_safe_to_target(unit)
+    local pox_pos = POSITION_LOOKUP[unit]
+    if not pox_pos then
+        return false
+    end
+
+    local human_players = Managers.player:human_players()
+    for _, player in pairs(human_players) do
+        if player.player_unit and player:unit_is_alive() then
+            local player_pos = POSITION_LOOKUP[player.player_unit]
+            if player_pos then
+                local diff = pox_pos - player_pos
+                if Vector3_dot(diff, diff) <= POXBURSTER_EXPLOSION_RADIUS_SQ then
+                    return false
+                end
+            end
+        end
+    end
+
+    return true
+end
+
 local function get_breed_priority(breed_name, unit)
     local setting_key = BREED_PRIORITY_MAP[breed_name]
     local priority = setting_key and mod:get(setting_key) or 0
@@ -182,30 +206,6 @@ local function is_in_fov(enemy_unit, camera_pos, camera_forward, min_dot)
     end
     local head_pos = Unit_world_position(enemy_unit, head_node)
     return Vector3_dot(camera_forward, Vector3_normalize(head_pos - camera_pos)) >= min_dot
-end
-
-local POXBURSTER_EXPLOSION_RADIUS_SQ = 6 * 6 -- 6m outer explosion radius, squared
-
-local function is_poxburster_safe_to_target(unit)
-    local pox_pos = POSITION_LOOKUP[unit]
-    if not pox_pos then
-        return false
-    end
-
-    local human_players = Managers.player:human_players()
-    for _, player in pairs(human_players) do
-        if player.player_unit and player:unit_is_alive() then
-            local player_pos = POSITION_LOOKUP[player.player_unit]
-            if player_pos then
-                local diff = pox_pos - player_pos
-                if Vector3_dot(diff, diff) <= POXBURSTER_EXPLOSION_RADIUS_SQ then
-                    return false
-                end
-            end
-        end
-    end
-
-    return true
 end
 
 local function can_see_head(enemy_unit, player)
