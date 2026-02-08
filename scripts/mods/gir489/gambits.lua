@@ -77,6 +77,15 @@ local BREED_PRIORITY_MAP = {
     renegade_rifleman = "target_ranged_regular" -- Scab Shooter
 }
 
+local BLOCKING_BREEDS = {
+    chaos_ogryn_bulwark = true,
+    chaos_ogryn_executor = true,
+}
+
+local POXBURSTER_BREEDS = {
+    chaos_poxwalker_bomber = true,
+}
+
 local math_rad = math.rad
 local math_cos = math.cos
 local math_atan2 = math.atan2
@@ -144,6 +153,9 @@ local function get_all_enemies()
 
             local priority = get_breed_priority(breed.name, unit)
             if priority > 0 then
+                if POXBURSTER_BREEDS[breed.name] and not is_poxburster_safe_to_target(unit) then
+                    goto next_unit
+                end
                 n = n + 1
                 enemies[n] = {
                     unit = unit,
@@ -172,6 +184,30 @@ local function is_in_fov(enemy_unit, camera_pos, camera_forward, min_dot)
     return Vector3_dot(camera_forward, Vector3_normalize(head_pos - camera_pos)) >= min_dot
 end
 
+local POXBURSTER_EXPLOSION_RADIUS_SQ = 6 * 6 -- 6m outer explosion radius, squared
+
+local function is_poxburster_safe_to_target(unit)
+    local pox_pos = POSITION_LOOKUP[unit]
+    if not pox_pos then
+        return false
+    end
+
+    local human_players = Managers.player:human_players()
+    for _, player in pairs(human_players) do
+        if player.player_unit and player:unit_is_alive() then
+            local player_pos = POSITION_LOOKUP[player.player_unit]
+            if player_pos then
+                local diff = pox_pos - player_pos
+                if Vector3_dot(diff, diff) <= POXBURSTER_EXPLOSION_RADIUS_SQ then
+                    return false
+                end
+            end
+        end
+    end
+
+    return true
+end
+
 local function can_see_head(enemy_unit, player)
     local head_node = Unit_node(enemy_unit, "j_head")
     if not head_node then
@@ -190,6 +226,7 @@ local function can_see_head(enemy_unit, player)
     local hits_dynamics = HitScan.raycast(physics_world, shooting_pos, dir, dist, nil, "filter_player_character_shooting_raycast_dynamics", 0, true, player, false)
 
     local target_head_hit = nil
+    local closest_blocker_dist = math_huge
     if hits_dynamics then
         for i = 1, #hits_dynamics do
             local hit = hits_dynamics[i]
@@ -197,6 +234,9 @@ local function can_see_head(enemy_unit, player)
             if actor then
                 local unit = Actor_unit(actor)
                 local zone_name = HitZone.get_name(unit, actor)
+                if zone_name == HitZone.hit_zone_names.afro then
+                    goto continue_can_see
+                end
                 if zone_name == HitZone.hit_zone_names.shield then
                     return false
                 end
@@ -204,12 +244,27 @@ local function can_see_head(enemy_unit, player)
                     if zone_name == HitZone.hit_zone_names.head then
                         target_head_hit = hit.distance or hit[2] or 0
                     end
+                else
+                    -- Check if a Crusher or Bulwark body is in the way
+                    local hit_breed = Breed.unit_breed_or_nil(unit)
+                    if hit_breed and BLOCKING_BREEDS[hit_breed.name] then
+                        local blocker_dist = hit.distance or hit[2] or 0
+                        if blocker_dist < closest_blocker_dist then
+                            closest_blocker_dist = blocker_dist
+                        end
+                    end
                 end
             end
+            ::continue_can_see::
         end
     end
 
     if not target_head_hit then
+        return false
+    end
+
+    -- A Crusher or Bulwark body is closer than the target's head
+    if closest_blocker_dist < target_head_hit then
         return false
     end
 
