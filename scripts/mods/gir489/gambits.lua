@@ -86,6 +86,11 @@ local POXBURSTER_BREEDS = {
     chaos_poxwalker_bomber = true,
 }
 
+local DAEMONHOST_BREEDS = {
+    chaos_daemonhost = true,
+    chaos_mutator_daemonhost = true,
+}
+
 local math_rad = math.rad
 local math_cos = math.cos
 local math_atan2 = math.atan2
@@ -140,9 +145,8 @@ end
 local function get_breed_priority(breed_name, unit)
     local setting_key = BREED_PRIORITY_MAP[breed_name]
     local priority = setting_key and mod:get(setting_key) or 0
-    local is_daemonhost = breed_name == "chaos_daemonhost" or breed_name == "chaos_mutator_daemonhost"
 
-    if is_daemonhost and priority > 0 then
+    if DAEMONHOST_BREEDS[breed_name] and priority > 0 then
         return get_daemonhost_priority(unit, priority)
     end
 
@@ -575,8 +579,10 @@ local function is_reticle_on_enemy()
                             if respect_priority and get_breed_priority(breed_name, hit_unit) == 0 then
                                 goto continue_hit_loop
                             else
-                                local is_daemonhost = breed_name == "chaos_daemonhost" or breed_name == "chaos_mutator_daemonhost"
-                                if is_daemonhost and get_daemonhost_priority(hit_unit, 1) == 0 then
+                                if DAEMONHOST_BREEDS[breed_name] and get_daemonhost_priority(hit_unit, 1) == 0 then
+                                    goto continue_hit_loop
+                                end
+                                if POXBURSTER_BREEDS[breed_name] and not is_poxburster_safe_to_target(unit) then
                                     goto continue_hit_loop
                                 end
                             end
