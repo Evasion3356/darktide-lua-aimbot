@@ -108,6 +108,35 @@ local PhysicsWorld_raycast = PhysicsWorld.raycast
 local World_physics_world = World.physics_world
 local Application_main_world = Application.main_world
 local Quaternion_forward = Quaternion.forward
+local table_sort = table.sort
+local pairs = pairs
+local next = next
+
+-- Pre-allocated reusable table and comparator to reduce GC pressure
+local reusable_enemies = {}
+local function priority_comparator(a, b)
+    return a.priority > b.priority
+end
+
+-- Cached settings, refreshed on change
+local cached_settings = {}
+local function refresh_settings()
+    cached_settings.enable_triggerbot = mod:get("enable_triggerbot")
+    cached_settings.triggerbot_keybind = mod:get("triggerbot_keybind")
+    cached_settings.triggerbot_use_raycast = mod:get("triggerbot_use_raycast")
+    cached_settings.triggerbot_weakspot_only = mod:get("triggerbot_weakspot_only")
+    cached_settings.triggerbot_respect_priority = mod:get("triggerbot_respect_priority")
+    cached_settings.require_main_weapon = mod:get("require_main_weapon")
+    cached_settings.use_mouse2_fallback = mod:get("use_mouse2_fallback")
+    cached_settings.enable_fov_check = mod:get("enable_fov_check")
+    cached_settings.fov_angle = mod:get("fov_angle")
+    cached_settings.disable_when_teammates_are_dead = mod:get("disable_when_teammates_are_dead")
+end
+refresh_settings()
+
+mod.on_setting_changed = function(setting_id)
+    refresh_settings()
+end
 
 local function get_daemonhost_priority(unit, priority)
     -- If it's been damaged, it's aggroed and should be targeted
@@ -156,18 +185,17 @@ end
 local function get_all_enemies()
     local extension_manager = Managers.state and Managers.state.extension
     if not extension_manager then
-        return {}
+        return reusable_enemies, 0
     end
 
     local entities = extension_manager:get_entities("MinionHuskLocomotionExtension")
     if not next(entities) then
         entities = extension_manager:get_entities("MinionLocomotionExtension")
         if not next(entities) then
-            return {}
+            return reusable_enemies, 0
         end
     end
 
-    local enemies = {}
     local n = 0
 
     for unit, _ in pairs(entities) do
@@ -185,22 +213,34 @@ local function get_all_enemies()
                     goto next_unit
                 end
                 n = n + 1
-                enemies[n] = {
-                    unit = unit,
-                    position = POSITION_LOOKUP[unit],
-                    priority = priority
-                }
+                local entry = reusable_enemies[n]
+                if entry then
+                    entry.unit = unit
+                    entry.position = POSITION_LOOKUP[unit]
+                    entry.priority = priority
+                else
+                    reusable_enemies[n] = {
+                        unit = unit,
+                        position = POSITION_LOOKUP[unit],
+                        priority = priority
+                    }
+                end
             end
 
             ::next_unit::
         end
     end
 
-    if n > 1 then
-        table.sort(enemies, function(a, b) return a.priority > b.priority end)
+    -- Clear stale trailing entries
+    for i = n + 1, #reusable_enemies do
+        reusable_enemies[i] = nil
     end
 
-    return enemies
+    if n > 1 then
+        table_sort(reusable_enemies, priority_comparator)
+    end
+
+    return reusable_enemies, n
 end
 
 local function is_in_fov(enemy_unit, camera_pos, camera_forward, min_dot)
@@ -367,7 +407,7 @@ local function auto_aim_priority_targets(player_unit)
     end
 
     -- Check if disable is enabled when teammates are dead
-    if mod:get("disable_when_teammates_are_dead") and are_teammates_dead() then
+    if cached_settings.disable_when_teammates_are_dead and are_teammates_dead() then
         has_target = false
         return
     end
@@ -377,14 +417,14 @@ local function auto_aim_priority_targets(player_unit)
     local shooting_pos = first_person_component.position
 
     local camera_forward, min_dot
-    local fov_check_enabled = mod:get("enable_fov_check")
+    local fov_check_enabled = cached_settings.enable_fov_check
     if fov_check_enabled then
         camera_forward = Quaternion_forward(first_person_component.rotation)
-        min_dot = math_cos(math_rad(mod:get("fov_angle") * 0.5))
+        min_dot = math_cos(math_rad(cached_settings.fov_angle * 0.5))
     end
 
-    local enemies = get_all_enemies()
-    for i = 1, #enemies do
+    local enemies, enemy_count = get_all_enemies()
+    for i = 1, enemy_count do
         local enemy = enemies[i]
         if not fov_check_enabled or is_in_fov(enemy.unit, shooting_pos, camera_forward, min_dot) then
             if can_see_head(enemy.unit, player) then
@@ -543,8 +583,16 @@ local function is_reticle_on_enemy()
         return false
     end
 
-    local weakspot_only = mod:get("triggerbot_weakspot_only")
-    local respect_priority = mod:get("triggerbot_respect_priority")
+    -- Hoist static raycast out of the loop — direction and position don't change per hit.
+    -- Use "closest" instead of "all" since we only need the nearest wall distance.
+    local wall_distance = math_huge
+    local hit_statics, _, static_dist = PhysicsWorld_raycast(physics_world, shooting_pos, direction, max_distance, "closest", "types", "statics", "collision_filter", "filter_player_character_shooting_raycast_statics")
+    if hit_statics then
+        wall_distance = static_dist
+    end
+
+    local weakspot_only = cached_settings.triggerbot_weakspot_only
+    local respect_priority = cached_settings.triggerbot_respect_priority
 
     for i = 1, #hits do
         local hit = hits[i]
@@ -582,18 +630,14 @@ local function is_reticle_on_enemy()
                                 if DAEMONHOST_BREEDS[breed_name] and get_daemonhost_priority(hit_unit, 1) == 0 then
                                     goto continue_hit_loop
                                 end
-                                if POXBURSTER_BREEDS[breed_name] and not is_poxburster_safe_to_target(unit) then
+                                if POXBURSTER_BREEDS[breed_name] and not is_poxburster_safe_to_target(hit_unit) then
                                     goto continue_hit_loop
                                 end
                             end
 
                             local hit_distance = hit.distance or hit[2] or 0
-                            local hits_statics = PhysicsWorld.raycast(physics_world, shooting_pos, direction, max_distance, "all", "types", "statics", "max_hits", 256, "collision_filter", "filter_player_character_shooting_raycast_statics")
-                            if hits_statics and #hits_statics > 0 then
-                                local wall_distance = hits_statics[1].distance or hits_statics[1][2] or math_huge
-                                if wall_distance < hit_distance then
-                                    goto continue_hit_loop
-                                end
+                            if wall_distance < hit_distance then
+                                goto continue_hit_loop
                             end
 
                             return true
@@ -618,7 +662,7 @@ mod.toggle_triggerbot = function(is_pressed)
 end
 
 local _get = function(func, self, action_name)
-    if self.type ~= "Ingame" or not mod:get("enable_triggerbot") then
+    if self.type ~= "Ingame" or not cached_settings.enable_triggerbot then
         return func(self, action_name)
     end
 
@@ -626,16 +670,16 @@ local _get = function(func, self, action_name)
         return func(self, action_name)
     end
 
-    local keybind = mod:get("triggerbot_keybind")
+    local keybind = cached_settings.triggerbot_keybind
     if next(keybind) and not triggerbot_pressed then
         return func(self, action_name)
     end
 
-    if mod:get("require_main_weapon") and not is_main_weapon_equipped() then
+    if cached_settings.require_main_weapon and not is_main_weapon_equipped() then
         return func(self, action_name)
     end
 
-    local can_fire = (mod:get("triggerbot_use_raycast") and is_reticle_on_enemy()) or has_target
+    local can_fire = (cached_settings.triggerbot_use_raycast and is_reticle_on_enemy()) or has_target
     if not can_fire then
         return func(self, action_name)
     end
@@ -667,10 +711,10 @@ mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, u
         return
     end
 
-    local use_mouse2 = mod:get("use_mouse2_fallback")
+    local use_mouse2 = cached_settings.use_mouse2_fallback
     local should_aim = (use_mouse2 and Mouse.button(Mouse.button_index("right")) > 0.5) or (not use_mouse2 and aim_button_pressed)
 
-    if should_aim and (not mod:get("require_main_weapon") or is_main_weapon_equipped()) then
+    if should_aim and (not cached_settings.require_main_weapon or is_main_weapon_equipped()) then
         auto_aim_priority_targets(unit)
     else
         has_target = false
