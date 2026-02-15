@@ -80,6 +80,8 @@ local BREED_PRIORITY_MAP = {
 local BLOCKING_BREEDS = {
     chaos_ogryn_bulwark = true,
     chaos_ogryn_executor = true,
+    chaos_daemonhost = true,
+    chaos_mutator_daemonhost = true,
 }
 
 local POXBURSTER_BREEDS = {
@@ -314,9 +316,9 @@ local function can_see_head(enemy_unit, player)
 
     local hit_statics, hit_pos, hit_dist = PhysicsWorld_raycast(physics_world, shooting_pos, dir, dist, "closest", "types", "statics", "collision_filter", "filter_player_character_shooting_raycast_statics")
 
-	if hit_statics and hit_dist < target_head_hit then
-		return false
-	end
+    if hit_statics and hit_dist < target_head_hit then
+        return false
+    end
 
     return true
 end
