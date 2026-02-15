@@ -147,7 +147,7 @@ local function get_daemonhost_priority(unit, priority)
     return 0
 end
 
-local POXBURSTER_EXPLOSION_RADIUS_SQ = 6 * 6 -- 6m outer explosion radius, squared
+local POXBURSTER_EXPLOSION_RADIUS_SQ = 42 -- 6m outer explosion radius, squared
 
 local function is_poxburster_safe_to_target(unit)
     local pox_pos = POSITION_LOOKUP[unit]

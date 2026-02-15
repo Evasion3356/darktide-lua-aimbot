@@ -144,19 +144,19 @@ return {
                         setting_id = "target_berzerkers",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 5
+                        default_value = 3
                     },
                     {
                         setting_id = "target_hounds",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 9
+                        default_value = 7
                     },
                     {
                         setting_id = "target_netgunners",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 8
+                        default_value = 7
                     },
                     {
                         setting_id = "target_flamers",
@@ -174,37 +174,37 @@ return {
                         setting_id = "target_bombers",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 4
+                        default_value = 6
                     },
                     {
                         setting_id = "target_gunners",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 4
+                        default_value = 6
                     },
                     {
                         setting_id = "target_mutants",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 9
+                        default_value = 3
                     },
                     {
                         setting_id = "target_ogryns_melee",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 1
+                        default_value = 3
                     },
                     {
                         setting_id = "target_ogryns",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 3
+                        default_value = 5
                     },
                     {
                         setting_id = "target_mauler",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 3
+                        default_value = 2
                     },
                     {
                         setting_id = "target_melee_regular",
