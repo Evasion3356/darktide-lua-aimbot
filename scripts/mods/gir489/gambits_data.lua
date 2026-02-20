@@ -86,7 +86,13 @@ return {
                         type = "checkbox",
                         default_value = true,
                         localize = true
-                    }
+                    },
+                    {
+                        setting_id = "require_main_weapon",
+                        type = "checkbox",
+                        default_value = true,
+                        localize = true
+                    },
                 }
             },
             {
@@ -114,12 +120,6 @@ return {
                         default_value = false
                     },
                     {
-                        setting_id = "require_main_weapon",
-                        type = "checkbox",
-                        default_value = true,
-                        localize = true
-                    },
-                    {
                         setting_id = "triggerbot_keybind",
                         type = "keybind",
                         default_value = {"extra_2"},
@@ -144,7 +144,7 @@ return {
                         setting_id = "target_berzerkers",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 3
+                        default_value = 4
                     },
                     {
                         setting_id = "target_hounds",
@@ -177,10 +177,16 @@ return {
                         default_value = 6
                     },
                     {
+                        setting_id = "target_poxwalkers",
+                        type = "dropdown",
+                        options = priority_options,
+                        default_value = 9
+                    },
+                    {
                         setting_id = "target_gunners",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 6
+                        default_value = 5
                     },
                     {
                         setting_id = "target_mutants",
@@ -204,7 +210,7 @@ return {
                         setting_id = "target_mauler",
                         type = "dropdown",
                         options = priority_options,
-                        default_value = 2
+                        default_value = 3
                     },
                     {
                         setting_id = "target_melee_regular",

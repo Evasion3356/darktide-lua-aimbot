@@ -35,8 +35,9 @@ local BREED_PRIORITY_MAP = {
     renegade_flamer_mutator = "target_flamers", --Scab Flamer
     -- Sniper
     renegade_sniper = "target_snipers", --Sniper
+    -- Poxbursters
+    chaos_poxwalker_bomber = "target_poxwalkers", --Poxburster
     -- Bombers
-    chaos_poxwalker_bomber = "target_bombers", --Poxburster
     cultist_grenadier = "target_bombers", --Dreg Tox Bomber
     renegade_grenadier = "target_bombers", --Scab Bomber
     -- Gunners
