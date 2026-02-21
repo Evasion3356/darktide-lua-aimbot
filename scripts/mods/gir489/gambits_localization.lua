@@ -274,6 +274,12 @@ local loc = {
         ru = "Автоматически наводиться на Бомбардиров и Гренадёров.",
         de = "Automatisch Bombenschützen und Grenadiere anvisieren."
     },
+    target_poxwalkers = {
+        en = "Target Poxbursters"
+    },
+    target_poxwalkers_description = {
+        en = "Automatically aim at Poxbursters."
+    },
     target_gunners = {
         en = "Target Gunners",
         ru = "Наводиться на Стрелков",
