@@ -5,6 +5,8 @@ local HitScan = require("scripts/utilities/attack/hit_scan")
 local WeaponTemplate = require("scripts/utilities/weapon/weapon_template")
 local Recoil = require("scripts/utilities/recoil")
 local Sway = require("scripts/utilities/sway")
+local Suppression = require("scripts/utilities/attack/suppression")
+local WeaponMovementState = require("scripts/extension_systems/weapon/utilities/weapon_movement_state")
 
 local HALF_PI = math.pi / 2
 
@@ -255,6 +257,95 @@ local function is_in_fov(enemy_unit, camera_pos, camera_forward, min_dot)
     return Vector3_dot(camera_forward, Vector3_normalize(head_pos - camera_pos)) >= min_dot
 end
 
+local PI_2 = math.pi * 2
+local SPREAD_DEFAULT_MIN_RATIO = 0.25
+local SPREAD_DEFAULT_RANDOM_RATIO = 0.75
+local SPREAD_DEFAULT_FIRST_SHOT_MIN_RATIO = 0.25
+local SPREAD_DEFAULT_FIRST_SHOT_RANDOM_RATIO = 0.4
+local SPREAD_DEFAULT_MAX_YAW_DELTA = 2
+local SPREAD_DEFAULT_MAX_PITCH_DELTA = 3
+
+-- Deterministically predict the spread offset that randomized_spread will apply
+-- on the next shot.  Reads component data directly via read_component to avoid
+-- accessing write-handle fields outside the spread system's update phase.
+-- Returns the offset quaternion (pitch_rot * yaw_rot), or nil when no spread
+-- template is active.
+local function predict_spread_offset(player_unit)
+	local weapon_ext = ScriptUnit_has_extension(player_unit, "weapon_system")
+	if not weapon_ext then
+        print("No weapon")
+		return nil
+	end
+
+	local spread_template = weapon_ext:spread_template()
+	if not spread_template then
+        print("No spread template")
+		return nil
+	end
+
+	local unit_data_ext = ScriptUnit_extension(player_unit, "unit_data_system")
+	local movement_state = unit_data_ext:read_component("movement_state")
+	local locomotion = unit_data_ext:read_component("locomotion")
+	local inair_state = unit_data_ext:read_component("inair_state")
+	local weapon_movement_state = WeaponMovementState.translate_movement_state_component(movement_state, locomotion, inair_state)
+	local spread_settings = spread_template[weapon_movement_state]
+
+	if not spread_settings then
+        print("No spread settings")
+		return nil
+	end
+
+	local rs = spread_settings.randomized_spread or {}
+	local spread_control = unit_data_ext:read_component("spread_control")
+	local spread = unit_data_ext:read_component("spread")
+	local shooting_status = unit_data_ext:read_component("shooting_status")
+	local suppression = unit_data_ext:read_component("suppression")
+
+	local buff_ext = ScriptUnit_extension(player_unit, "buff_system")
+	local spread_modifier = buff_ext:stat_buffs().spread_modifier or 1
+	local current_pitch = spread.pitch * spread_modifier
+	local current_yaw = spread.yaw * spread_modifier
+
+	current_pitch, current_yaw = Suppression.apply_suppression_offsets_to_spread(suppression, current_pitch, current_yaw)
+
+	local first_shot = shooting_status.num_shots == 0
+	local min_ratio = first_shot and (rs.first_shot_min_ratio or SPREAD_DEFAULT_FIRST_SHOT_MIN_RATIO) or (rs.min_ratio or SPREAD_DEFAULT_MIN_RATIO)
+	local random_ratio = first_shot and (rs.first_shot_random_ratio or SPREAD_DEFAULT_FIRST_SHOT_RANDOM_RATIO) or (rs.random_ratio or SPREAD_DEFAULT_RANDOM_RATIO)
+
+	local seed = spread_control.seed
+	local previous_yaw = spread_control.previous_yaw_offset
+	local previous_pitch = spread_control.previous_pitch_offset
+
+	local random_value
+	seed, random_value = math.next_random(seed)
+	local multiplier = min_ratio + random_ratio * random_value
+
+	seed, random_value = math.next_random(seed)
+	local roll = random_value * PI_2
+	local yaw_offset = math.sin(roll) * current_yaw * multiplier
+	local pitch_offset = math.cos(roll) * current_pitch * multiplier
+
+	if first_shot then
+		previous_yaw = yaw_offset
+		previous_pitch = pitch_offset
+	end
+
+	-- Replicate _rotation_from_offset for yaw
+	local yaw_diff = math.abs(previous_yaw - yaw_offset)
+	local yaw_t = yaw_diff == 0 and 1 or math.min(rs.max_yaw_delta or SPREAD_DEFAULT_MAX_YAW_DELTA, 1)
+	local lerped_yaw = math.lerp(previous_yaw, yaw_offset, yaw_t)
+	local yaw_rot = Quaternion(Vector3.up(), math.degrees_to_radians(lerped_yaw))
+
+	-- Replicate _rotation_from_offset for pitch
+	local pitch_diff = math.abs(previous_pitch - pitch_offset)
+	local pitch_t = pitch_diff == 0 and 1 or math.min(rs.max_pitch_delta or SPREAD_DEFAULT_MAX_PITCH_DELTA, 1)
+	local lerped_pitch = math.lerp(previous_pitch, pitch_offset, pitch_t)
+	local pitch_rot = Quaternion(Vector3.right(), math.degrees_to_radians(lerped_pitch))
+
+	-- final = input * pitch * yaw  =>  offset = pitch * yaw
+	return Quaternion.multiply(pitch_rot, yaw_rot)
+end
+
 local function can_see_head(enemy_unit, player)
     local head_node = Unit_node(enemy_unit, "j_head")
     if not head_node then
@@ -332,14 +423,24 @@ local function look_at_enemy_head(enemy_unit, player, shooting_pos, player_unit)
     local head_pos = Unit_world_position(enemy_unit, head_node)
     local dir = Vector3_normalize(head_pos - shooting_pos)
 
-    -- Get base orientation without recoil
+    -- Desired aim direction toward head
     local base_pitch = math_asin(dir.z)
     local base_yaw = math_atan2(dir.y, dir.x) - HALF_PI
 
-    -- Apply recoil and sway like the weapon does
     local unit_data_ext = ScriptUnit_extension(player_unit, "unit_data_system")
     local recoil_component = unit_data_ext:read_component("recoil")
     local sway_component = unit_data_ext:read_component("sway")
+
+    -- Deterministically compensate for spread by predicting the offset
+    -- and pre-adjusting the aim direction so it cancels out on the next shot
+    local spread_offset = predict_spread_offset(player_unit)
+    if spread_offset then
+        local desired_rot = Quaternion.look(dir, Vector3.up())
+        local compensated_rot = Quaternion.multiply(desired_rot, Quaternion.inverse(spread_offset))
+        local comp_fwd = Quaternion_forward(compensated_rot)
+        base_pitch = math_asin(comp_fwd.z)
+        base_yaw = math_atan2(comp_fwd.y, comp_fwd.x) - HALF_PI
+    end
 
     player:set_orientation(base_yaw - recoil_component.yaw_offset - sway_component.offset_x, base_pitch - recoil_component.pitch_offset - sway_component.offset_y, 0)
 end
