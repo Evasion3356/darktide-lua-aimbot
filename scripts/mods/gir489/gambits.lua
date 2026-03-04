@@ -274,13 +274,11 @@ local SPREAD_DEFAULT_MAX_PITCH_DELTA = 3
 local function predict_spread_offset(player_unit)
     local weapon_ext = ScriptUnit_has_extension(player_unit, "weapon_system")
     if not weapon_ext then
-        print("No weapon")
         return nil
     end
 
     local spread_template = weapon_ext:spread_template()
     if not spread_template then
-        print("No spread template")
         return nil
     end
 
@@ -292,7 +290,6 @@ local function predict_spread_offset(player_unit)
     local spread_settings = spread_template[weapon_movement_state]
 
     if not spread_settings then
-        print("No spread settings")
         return nil
     end
 
@@ -700,7 +697,7 @@ local function is_reticle_on_enemy()
         return false
     end
 
-    -- Hoist static raycast out of the loop  direction and position don't change per hit.
+    -- Hoist static raycast out of the loop-direction and position don't change per hit.
     -- Use "closest" instead of "all" since we only need the nearest wall distance.
     local wall_distance = math_huge
     local hit_statics, _, static_dist = PhysicsWorld_raycast(physics_world, shooting_pos, direction, max_distance, "closest", "types", "statics", "collision_filter", "filter_player_character_shooting_raycast_statics")
