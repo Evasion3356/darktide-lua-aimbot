@@ -93,6 +93,11 @@ return {
                         default_value = true,
                         localize = true
                     },
+                    {
+                        setting_id = "enable_spread_compensation",
+                        type = "checkbox",
+                        default_value = true
+                    },
                 }
             },
             {

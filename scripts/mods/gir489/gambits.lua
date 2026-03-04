@@ -139,6 +139,7 @@ local function refresh_settings()
     cached_settings.enable_fov_check = mod:get("enable_fov_check")
     cached_settings.fov_angle = mod:get("fov_angle")
     cached_settings.disable_when_teammates_are_dead = mod:get("disable_when_teammates_are_dead")
+    cached_settings.enable_spread_compensation = mod:get("enable_spread_compensation")
 end
 refresh_settings()
 
@@ -274,81 +275,81 @@ local SPREAD_DEFAULT_MAX_PITCH_DELTA = 3
 -- Returns the offset quaternion (pitch_rot * yaw_rot), or nil when no spread
 -- template is active.
 local function predict_spread_offset(player_unit)
-	local weapon_ext = ScriptUnit_has_extension(player_unit, "weapon_system")
-	if not weapon_ext then
+    local weapon_ext = ScriptUnit_has_extension(player_unit, "weapon_system")
+    if not weapon_ext then
         print("No weapon")
-		return nil
-	end
+        return nil
+    end
 
-	local spread_template = weapon_ext:spread_template()
-	if not spread_template then
+    local spread_template = weapon_ext:spread_template()
+    if not spread_template then
         print("No spread template")
-		return nil
-	end
+        return nil
+    end
 
-	local unit_data_ext = ScriptUnit_extension(player_unit, "unit_data_system")
-	local movement_state = unit_data_ext:read_component("movement_state")
-	local locomotion = unit_data_ext:read_component("locomotion")
-	local inair_state = unit_data_ext:read_component("inair_state")
-	local weapon_movement_state = WeaponMovementState.translate_movement_state_component(movement_state, locomotion, inair_state)
-	local spread_settings = spread_template[weapon_movement_state]
+    local unit_data_ext = ScriptUnit_extension(player_unit, "unit_data_system")
+    local movement_state = unit_data_ext:read_component("movement_state")
+    local locomotion = unit_data_ext:read_component("locomotion")
+    local inair_state = unit_data_ext:read_component("inair_state")
+    local weapon_movement_state = WeaponMovementState.translate_movement_state_component(movement_state, locomotion, inair_state)
+    local spread_settings = spread_template[weapon_movement_state]
 
-	if not spread_settings then
+    if not spread_settings then
         print("No spread settings")
-		return nil
-	end
+        return nil
+    end
 
-	local rs = spread_settings.randomized_spread or {}
-	local spread_control = unit_data_ext:read_component("spread_control")
-	local spread = unit_data_ext:read_component("spread")
-	local shooting_status = unit_data_ext:read_component("shooting_status")
-	local suppression = unit_data_ext:read_component("suppression")
+    local rs = spread_settings.randomized_spread or {}
+    local spread_control = unit_data_ext:read_component("spread_control")
+    local spread = unit_data_ext:read_component("spread")
+    local shooting_status = unit_data_ext:read_component("shooting_status")
+    local suppression = unit_data_ext:read_component("suppression")
 
-	local buff_ext = ScriptUnit_extension(player_unit, "buff_system")
-	local spread_modifier = buff_ext:stat_buffs().spread_modifier or 1
-	local current_pitch = spread.pitch * spread_modifier
-	local current_yaw = spread.yaw * spread_modifier
+    local buff_ext = ScriptUnit_extension(player_unit, "buff_system")
+    local spread_modifier = buff_ext:stat_buffs().spread_modifier or 1
+    local current_pitch = spread.pitch * spread_modifier
+    local current_yaw = spread.yaw * spread_modifier
 
-	current_pitch, current_yaw = Suppression.apply_suppression_offsets_to_spread(suppression, current_pitch, current_yaw)
+    current_pitch, current_yaw = Suppression.apply_suppression_offsets_to_spread(suppression, current_pitch, current_yaw)
 
-	local first_shot = shooting_status.num_shots == 0
-	local min_ratio = first_shot and (rs.first_shot_min_ratio or SPREAD_DEFAULT_FIRST_SHOT_MIN_RATIO) or (rs.min_ratio or SPREAD_DEFAULT_MIN_RATIO)
-	local random_ratio = first_shot and (rs.first_shot_random_ratio or SPREAD_DEFAULT_FIRST_SHOT_RANDOM_RATIO) or (rs.random_ratio or SPREAD_DEFAULT_RANDOM_RATIO)
+    local first_shot = shooting_status.num_shots == 0
+    local min_ratio = first_shot and (rs.first_shot_min_ratio or SPREAD_DEFAULT_FIRST_SHOT_MIN_RATIO) or (rs.min_ratio or SPREAD_DEFAULT_MIN_RATIO)
+    local random_ratio = first_shot and (rs.first_shot_random_ratio or SPREAD_DEFAULT_FIRST_SHOT_RANDOM_RATIO) or (rs.random_ratio or SPREAD_DEFAULT_RANDOM_RATIO)
 
-	local seed = spread_control.seed
-	local previous_yaw = spread_control.previous_yaw_offset
-	local previous_pitch = spread_control.previous_pitch_offset
+    local seed = spread_control.seed
+    local previous_yaw = spread_control.previous_yaw_offset
+    local previous_pitch = spread_control.previous_pitch_offset
 
-	local random_value
-	seed, random_value = math.next_random(seed)
-	local multiplier = min_ratio + random_ratio * random_value
+    local random_value
+    seed, random_value = math.next_random(seed)
+    local multiplier = min_ratio + random_ratio * random_value
 
-	seed, random_value = math.next_random(seed)
-	local roll = random_value * PI_2
-	local yaw_offset = math.sin(roll) * current_yaw * multiplier
-	local pitch_offset = math.cos(roll) * current_pitch * multiplier
+    seed, random_value = math.next_random(seed)
+    local roll = random_value * PI_2
+    local yaw_offset = math.sin(roll) * current_yaw * multiplier
+    local pitch_offset = math.cos(roll) * current_pitch * multiplier
 
-	if first_shot then
-		previous_yaw = yaw_offset
-		previous_pitch = pitch_offset
-	end
+    if first_shot then
+        previous_yaw = yaw_offset
+        previous_pitch = pitch_offset
+    end
 
-	-- Replicate _rotation_from_offset for yaw
-	local yaw_diff = math.abs(previous_yaw - yaw_offset)
-	local max_yaw_delta = rs.max_yaw_delta or SPREAD_DEFAULT_MAX_YAW_DELTA
-	local yaw_t = yaw_diff <= 0.00001 and 1 or math.min(max_yaw_delta / yaw_diff, 1)
-	local lerped_yaw = math.lerp(previous_yaw, yaw_offset, yaw_t)
-	local yaw_rot = Quaternion(Vector3.up(), math.degrees_to_radians(lerped_yaw))
+    -- Replicate _rotation_from_offset for yaw
+    local yaw_diff = math.abs(previous_yaw - yaw_offset)
+    local max_yaw_delta = rs.max_yaw_delta or SPREAD_DEFAULT_MAX_YAW_DELTA
+    local yaw_t = yaw_diff <= 0.00001 and 1 or math.min(max_yaw_delta / yaw_diff, 1)
+    local lerped_yaw = math.lerp(previous_yaw, yaw_offset, yaw_t)
+    local yaw_rot = Quaternion(Vector3.up(), math.degrees_to_radians(lerped_yaw))
 
-	-- Replicate _rotation_from_offset for pitch
-	local pitch_diff = math.abs(previous_pitch - pitch_offset)
-	local max_pitch_delta = rs.max_pitch_delta or SPREAD_DEFAULT_MAX_PITCH_DELTA
-	local pitch_t = pitch_diff <= 0.00001 and 1 or math.min(max_pitch_delta / pitch_diff, 1)
-	local lerped_pitch = math.lerp(previous_pitch, pitch_offset, pitch_t)
-	local pitch_rot = Quaternion(Vector3.right(), math.degrees_to_radians(lerped_pitch))
+    -- Replicate _rotation_from_offset for pitch
+    local pitch_diff = math.abs(previous_pitch - pitch_offset)
+    local max_pitch_delta = rs.max_pitch_delta or SPREAD_DEFAULT_MAX_PITCH_DELTA
+    local pitch_t = pitch_diff <= 0.00001 and 1 or math.min(max_pitch_delta / pitch_diff, 1)
+    local lerped_pitch = math.lerp(previous_pitch, pitch_offset, pitch_t)
+    local pitch_rot = Quaternion(Vector3.right(), math.degrees_to_radians(lerped_pitch))
 
-	-- final = input * pitch * yaw  =>  offset = pitch * yaw
-	return Quaternion.multiply(pitch_rot, yaw_rot)
+    -- final = input * pitch * yaw  =>  offset = pitch * yaw
+    return Quaternion.multiply(pitch_rot, yaw_rot)
 end
 
 local function can_see_head(enemy_unit, player)
@@ -438,13 +439,15 @@ local function look_at_enemy_head(enemy_unit, player, shooting_pos, player_unit)
 
     -- Deterministically compensate for spread by predicting the offset
     -- and pre-adjusting the aim direction so it cancels out on the next shot
-    local spread_offset = predict_spread_offset(player_unit)
-    if spread_offset then
-        local desired_rot = Quaternion.look(dir, Vector3.up())
-        local compensated_rot = Quaternion.multiply(desired_rot, Quaternion.inverse(spread_offset))
-        local comp_fwd = Quaternion_forward(compensated_rot)
-        base_pitch = math_asin(comp_fwd.z)
-        base_yaw = math_atan2(comp_fwd.y, comp_fwd.x) - HALF_PI
+    if cached_settings.enable_spread_compensation then
+        local spread_offset = predict_spread_offset(player_unit)
+        if spread_offset then
+            local desired_rot = Quaternion.look(dir, Vector3.up())
+            local compensated_rot = Quaternion.multiply(desired_rot, Quaternion.inverse(spread_offset))
+            local comp_fwd = Quaternion_forward(compensated_rot)
+            base_pitch = math_asin(comp_fwd.z)
+            base_yaw = math_atan2(comp_fwd.y, comp_fwd.x) - HALF_PI
+        end
     end
 
     player:set_orientation(base_yaw - recoil_component.yaw_offset - sway_component.offset_x, base_pitch - recoil_component.pitch_offset - sway_component.offset_y, 0)
@@ -676,10 +679,12 @@ local function is_reticle_on_enemy()
                 end
             end
 
-			-- Apply predicted spread so triggerbot ray matches actual next shot prediction
-            local spread_offset = predict_spread_offset(player.player_unit)
-            if spread_offset then
-                ray_rotation = Quaternion.multiply(ray_rotation, spread_offset)
+            -- Apply predicted spread so triggerbot ray matches actual next shot prediction
+            if cached_settings.enable_spread_compensation then
+                local spread_offset = predict_spread_offset(player.player_unit)
+                if spread_offset then
+                    ray_rotation = Quaternion.multiply(ray_rotation, spread_offset)
+                end
             end
 
             -- Get max distance from weapon template
