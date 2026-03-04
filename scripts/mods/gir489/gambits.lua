@@ -101,6 +101,9 @@ local math_cos = math.cos
 local math_atan2 = math.atan2
 local math_asin = math.asin
 local math_huge = math.huge
+local math_sin = math.sin
+local math_abs = math.abs
+local math_min = math.min
 local Vector3_normalize = Vector3.normalize
 local Vector3_dot = Vector3.dot
 local Vector3_length = Vector3.length
@@ -332,13 +335,15 @@ local function predict_spread_offset(player_unit)
 
 	-- Replicate _rotation_from_offset for yaw
 	local yaw_diff = math.abs(previous_yaw - yaw_offset)
-	local yaw_t = yaw_diff == 0 and 1 or math.min(rs.max_yaw_delta or SPREAD_DEFAULT_MAX_YAW_DELTA, 1)
+	local max_yaw_delta = rs.max_yaw_delta or SPREAD_DEFAULT_MAX_YAW_DELTA
+	local yaw_t = yaw_diff <= 0.00001 and 1 or math.min(max_yaw_delta / yaw_diff, 1)
 	local lerped_yaw = math.lerp(previous_yaw, yaw_offset, yaw_t)
 	local yaw_rot = Quaternion(Vector3.up(), math.degrees_to_radians(lerped_yaw))
 
 	-- Replicate _rotation_from_offset for pitch
 	local pitch_diff = math.abs(previous_pitch - pitch_offset)
-	local pitch_t = pitch_diff == 0 and 1 or math.min(rs.max_pitch_delta or SPREAD_DEFAULT_MAX_PITCH_DELTA, 1)
+	local max_pitch_delta = rs.max_pitch_delta or SPREAD_DEFAULT_MAX_PITCH_DELTA
+	local pitch_t = pitch_diff <= 0.00001 and 1 or math.min(max_pitch_delta / pitch_diff, 1)
 	local lerped_pitch = math.lerp(previous_pitch, pitch_offset, pitch_t)
 	local pitch_rot = Quaternion(Vector3.right(), math.degrees_to_radians(lerped_pitch))
 
@@ -671,6 +676,12 @@ local function is_reticle_on_enemy()
                 end
             end
 
+			-- Apply predicted spread so triggerbot ray matches actual next shot prediction
+            local spread_offset = predict_spread_offset(player.player_unit)
+            if spread_offset then
+                ray_rotation = Quaternion.multiply(ray_rotation, spread_offset)
+            end
+
             -- Get max distance from weapon template
             if weapon_template.hit_scan_template and weapon_template.hit_scan_template.range then
                 max_distance = weapon_template.hit_scan_template.range
@@ -687,7 +698,7 @@ local function is_reticle_on_enemy()
         return false
     end
 
-    -- Hoist static raycast out of the loop — direction and position don't change per hit.
+    -- Hoist static raycast out of the loop Â— direction and position don't change per hit.
     -- Use "closest" instead of "all" since we only need the nearest wall distance.
     local wall_distance = math_huge
     local hit_statics, _, static_dist = PhysicsWorld_raycast(physics_world, shooting_pos, direction, max_distance, "closest", "types", "statics", "collision_filter", "filter_player_character_shooting_raycast_statics")
