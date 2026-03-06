@@ -101,6 +101,9 @@ local math_cos = math.cos
 local math_atan2 = math.atan2
 local math_asin = math.asin
 local math_huge = math.huge
+local math_sin = math.sin
+local math_abs = math.abs
+local math_min = math.min
 local Vector3_normalize = Vector3.normalize
 local Vector3_dot = Vector3.dot
 local Vector3_length = Vector3.length
@@ -320,8 +323,8 @@ local function predict_spread_offset(player_unit)
 
     seed, random_value = math.next_random(seed)
     local roll = random_value * PI_2
-    local yaw_offset = math.sin(roll) * current_yaw * multiplier
-    local pitch_offset = math.cos(roll) * current_pitch * multiplier
+    local yaw_offset = math_sin(roll) * current_yaw * multiplier
+    local pitch_offset = math_cos(roll) * current_pitch * multiplier
 
     if first_shot then
         previous_yaw = yaw_offset
@@ -329,16 +332,16 @@ local function predict_spread_offset(player_unit)
     end
 
     -- Replicate _rotation_from_offset for yaw
-    local yaw_diff = math.abs(previous_yaw - yaw_offset)
+    local yaw_diff = math_abs(previous_yaw - yaw_offset)
     local max_yaw_delta = rs.max_yaw_delta or SPREAD_DEFAULT_MAX_YAW_DELTA
-    local yaw_t = yaw_diff <= 0.00001 and 1 or math.min(max_yaw_delta / yaw_diff, 1)
+    local yaw_t = yaw_diff <= 0.00001 and 1 or math_min(max_yaw_delta / yaw_diff, 1)
     local lerped_yaw = math.lerp(previous_yaw, yaw_offset, yaw_t)
     local yaw_rot = Quaternion(Vector3.up(), math.degrees_to_radians(lerped_yaw))
 
     -- Replicate _rotation_from_offset for pitch
-    local pitch_diff = math.abs(previous_pitch - pitch_offset)
+    local pitch_diff = math_abs(previous_pitch - pitch_offset)
     local max_pitch_delta = rs.max_pitch_delta or SPREAD_DEFAULT_MAX_PITCH_DELTA
-    local pitch_t = pitch_diff <= 0.00001 and 1 or math.min(max_pitch_delta / pitch_diff, 1)
+    local pitch_t = pitch_diff <= 0.00001 and 1 or math_min(max_pitch_delta / pitch_diff, 1)
     local lerped_pitch = math.lerp(previous_pitch, pitch_offset, pitch_t)
     local pitch_rot = Quaternion(Vector3.right(), math.degrees_to_radians(lerped_pitch))
 
