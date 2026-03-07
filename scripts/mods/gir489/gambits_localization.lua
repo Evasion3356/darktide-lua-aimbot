@@ -197,6 +197,16 @@ local loc = {
         ru = "Если включено, аимбот будет активироваться только при экипировке основного оружия (слот 2).",
         de = "Wenn aktiviert, wird der Aimbot nur aktiviert, wenn Ihre Hauptwaffe (Slot 2) ausgerüstet ist."
     },
+    enable_spread_compensation = {
+        en = "Enable Spread Compensation",
+        ru = "Включить компенсацию разброса",
+        de = "Streuungskompensation aktivieren"
+    },
+    enable_spread_compensation_description = {
+        en = "If enabled, aim and triggerbot raycast will predict and compensate for weapon spread.",
+        ru = "Если включено, прицел и луч триггербота будут предсказывать и компенсировать разброс оружия.",
+        de = "Wenn aktiviert, werden Zielen und Triggerbot-Raycast die Waffenstreuung vorhersagen und kompensieren."
+    },
 
     -- Priority Targets
     priority_targets = {
