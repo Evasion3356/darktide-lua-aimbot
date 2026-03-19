@@ -19,6 +19,7 @@ local BREED_PRIORITY_MAP = {
     -- Hound
     chaos_hound = "target_hounds", --Pox Hound
     chaos_hound_mutator = "target_hounds", --Pox Hound
+    chaos_armored_hound = "target_hounds", -- Armored Hound
     -- Boss Enemies
     chaos_beast_of_nurgle = "target_bosses", --Beast of Nurgle
     chaos_plague_ogryn = "target_bosses", --Plague Ogyrn
@@ -29,6 +30,7 @@ local BREED_PRIORITY_MAP = {
     renegade_twin_captain_two = "target_bosses", --Rinda Karnak
     chaos_daemonhost = "target_bosses", --Daemonhost (with special check below)
     chaos_mutator_daemonhost = "target_bosses", --Daemonhost (with special check below)
+    chaos_ogryn_houndmaster = "target_bosses", --Houndmaster
     -- Trappers
     renegade_netgunner = "target_netgunners", --Trapper
     -- Flamers
