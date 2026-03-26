@@ -58,11 +58,12 @@ local BREED_PRIORITY_MAP = {
     -- Mutants
     cultist_mutant = "target_mutants", --Mutant
     cultist_mutant_mutator = "target_mutants", --Mutant
-    -- Ogryns (Melee)
-    chaos_ogryn_bulwark = "target_ogryns_melee", --Bulwark
-    chaos_ogryn_executor = "target_ogryns_melee", --Crusher
-    -- Ogryn
-    chaos_ogryn_gunner = "target_ogryns", --Reaper
+    -- Bulwark
+    chaos_ogryn_bulwark = "target_bulwarks", --Bulwark
+    --Crusher
+    chaos_ogryn_executor = "target_crushers", --Crusher
+    -- Reaper
+    chaos_ogryn_gunner = "target_reapers", --Reaper
 
     -- Melee (regular)
     chaos_armored_infected = "target_melee_regular", -- Amoured Groaner
@@ -97,6 +98,21 @@ local DAEMONHOST_BREEDS = {
     chaos_daemonhost = true,
     chaos_mutator_daemonhost = true,
 }
+
+local VALID_ARCHETYPES = {
+    veteran = true,
+    zealot  = true,
+    psyker  = true,
+    ogryn   = true,
+}
+
+local function get_player_archetype()
+    local player = Managers.player:local_player(1)
+    if not player then return nil end
+    local profile = player:profile()
+    local name = profile and profile.archetype and profile.archetype.name
+    return VALID_ARCHETYPES[name] and name or nil
+end
 
 local math_rad = math.rad
 local math_cos = math.cos
@@ -141,6 +157,7 @@ local function refresh_settings()
     cached_settings.enable_fov_check = mod:get("enable_fov_check")
     cached_settings.fov_angle = mod:get("fov_angle")
     cached_settings.disable_when_teammates_are_dead = mod:get("disable_when_teammates_are_dead")
+    cached_settings.priority_profile = mod:get("priority_profile")
     cached_settings.enable_spread_compensation = mod:get("enable_spread_compensation")
 end
 refresh_settings()
@@ -183,8 +200,24 @@ local function is_poxburster_safe_to_target(unit)
 end
 
 local function get_breed_priority(breed_name, unit)
-    local setting_key = BREED_PRIORITY_MAP[breed_name]
-    local priority = setting_key and mod:get(setting_key) or 0
+    local base_key = BREED_PRIORITY_MAP[breed_name]
+    if not base_key then return 0 end
+
+    local profile = cached_settings.priority_profile or "auto"
+    local setting_key
+
+    if profile == "auto" then
+        -- Detect class at runtime; fall back to custom keys if unavailable
+        local archetype = get_player_archetype()
+        setting_key = archetype and (archetype .. "_" .. base_key) or base_key
+    elseif profile == "custom" then
+        setting_key = base_key
+    else
+        -- Explicit class chosen ("veteran" / "zealot" / "psyker" / "ogryn")
+        setting_key = profile .. "_" .. base_key
+    end
+
+    local priority = mod:get(setting_key) or 0
 
     if DAEMONHOST_BREEDS[breed_name] and priority > 0 then
         return get_daemonhost_priority(unit, priority)
