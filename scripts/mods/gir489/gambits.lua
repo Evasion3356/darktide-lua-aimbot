@@ -106,6 +106,18 @@ local VALID_ARCHETYPES = {
     ogryn   = true,
 }
 
+-- Maps each priority_profile value to the setting-key prefix used in gambits_data.lua.
+-- "custom" uses no prefix (the base priority_targets group).
+local PROFILE_PREFIXES = {
+    custom  = "",
+    veteran = "veteran_",
+    zealot  = "zealot_",
+    psyker  = "psyker_",
+    ogryn   = "ogryn_",
+    adamant = "adamant_",
+    broker  = "broker_",
+}
+
 local function get_player_archetype()
     local player = Managers.player:local_player(1)
     if not player then return nil end
@@ -159,6 +171,17 @@ local function refresh_settings()
     cached_settings.disable_when_teammates_are_dead = mod:get("disable_when_teammates_are_dead")
     cached_settings.priority_profile = mod:get("priority_profile")
     cached_settings.enable_spread_compensation = mod:get("enable_spread_compensation")
+
+    -- Build a [class][breed_name] -> priority lookup table so get_breed_priority
+    local pt = cached_settings.priority_target or {}
+    for class, prefix in pairs(PROFILE_PREFIXES) do
+        local class_tbl = pt[class] or {}
+        for breed_name, base_key in pairs(BREED_PRIORITY_MAP) do
+            class_tbl[breed_name] = mod:get(prefix .. base_key) or 0
+        end
+        pt[class] = class_tbl
+    end
+    cached_settings.priority_target = pt
 end
 refresh_settings()
 
@@ -200,29 +223,19 @@ local function is_poxburster_safe_to_target(unit)
 end
 
 local function get_breed_priority(breed_name, unit)
-    local base_key = BREED_PRIORITY_MAP[breed_name]
-    if not base_key then return 0 end
-
     local profile = cached_settings.priority_profile or "auto"
-    local setting_key
-
+    local tbl
     if profile == "auto" then
-        -- Detect class at runtime; fall back to custom keys if unavailable
         local archetype = get_player_archetype()
-        setting_key = archetype and (archetype .. "_" .. base_key) or base_key
-    elseif profile == "custom" then
-        setting_key = base_key
+        tbl = cached_settings.priority_target[archetype or "custom"]
     else
-        -- Explicit class chosen ("veteran" / "zealot" / "psyker" / "ogryn")
-        setting_key = profile .. "_" .. base_key
+        tbl = cached_settings.priority_target[profile]
     end
 
-    local priority = mod:get(setting_key) or 0
-
-    if DAEMONHOST_BREEDS[breed_name] and priority > 0 then
+    local priority = (tbl and tbl[breed_name]) or 0
+    if priority > 0 and DAEMONHOST_BREEDS[breed_name] then
         return get_daemonhost_priority(unit, priority)
     end
-
     return priority
 end
 
