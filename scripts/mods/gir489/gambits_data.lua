@@ -1,27 +1,33 @@
 local mod = get_mod("darktide-lua-gambits")
 
 local priority_options = {
-    { text = "Off",      value = 0 },
-    { text = "Lowest",   value = 1 },
-    { text = "Lower",    value = 2 },
-    { text = "Low",      value = 3 },
-    { text = "Medium",   value = 4 },
-    { text = "Elevated", value = 5 },
-    { text = "High",     value = 6 },
-    { text = "Extreme",  value = 7 },
-    { text = "Ultra",    value = 8 },
-    { text = "Critical", value = 9 },
+    { text = "Off", value = 0  },
+    { text = "1",   value = 1  },
+    { text = "2",   value = 2  },
+    { text = "3",   value = 3  },
+    { text = "4",   value = 4  },
+    { text = "5",   value = 5  },
+    { text = "6",   value = 6  },
+    { text = "7",   value = 7  },
+    { text = "8",   value = 8  },
+    { text = "9",   value = 9  },
+    { text = "10",  value = 10 },
+    { text = "11",  value = 11 },
+    { text = "12",  value = 12 },
+    { text = "13",  value = 13 },
+    { text = "14",  value = 14 },
+    { text = "15",  value = 15 },
 }
 
 local profile_options = {
-    { text = "AutoClass",    value = "auto"    },
-    { text = "CustomClass",  value = "custom"  },
-    { text = "VeteranClass", value = "veteran" },
-    { text = "ZealotClass",  value = "zealot"  },
-    { text = "PsykerClass",  value = "psyker"  },
-    { text = "OgrynClass",   value = "ogryn"   },
-    { text = "ArbitratorClass",   value = "adamant"   },
-    { text = "BrokerClass",   value = "broker"   },
+    { text = "AutoClass",         value = "auto"    },
+    { text = "CustomClass",       value = "custom"  },
+    { text = "VeteranClass",      value = "veteran" },
+    { text = "ZealotClass",       value = "zealot"  },
+    { text = "PsykerClass",       value = "psyker"  },
+    { text = "OgrynClass",        value = "ogryn"   },
+    { text = "ArbitratorClass",   value = "adamant" },
+    { text = "BrokerClass",       value = "broker"  },
 }
 
 local function make_target_widgets(prefix, d)
@@ -51,10 +57,10 @@ end
 -- Psyker:  glass cannon — avoids being grabbed; snipers/trappers lethal.
 -- Ogryn:   slow tank — specials exploit the lack of mobility.
 local CLASS_DEFAULTS = {
-    veteran = { bosses=3, berzerkers=4, hounds=9, netgunners=9, flamers=5, snipers=9, bombers=7, poxwalkers=9, gunners=6, mutants=3, crushers=2, bulwarks=2, reapers=5, mauler=3, melee_regular=0, ranged_regular=1 },
-    zealot  = { bosses=4, berzerkers=6, hounds=9, netgunners=9, flamers=6, snipers=8, bombers=6, poxwalkers=8, gunners=4, mutants=6, crushers=4, bulwarks=3, reapers=4, mauler=5, melee_regular=1, ranged_regular=1 },
-    psyker  = { bosses=3, berzerkers=6, hounds=9, netgunners=9, flamers=7, snipers=9, bombers=6, poxwalkers=9, gunners=5, mutants=6, crushers=3, bulwarks=2, reapers=5, mauler=3, melee_regular=0, ranged_regular=2 },
-    ogryn   = { bosses=5, berzerkers=5, hounds=9, netgunners=9, flamers=7, snipers=8, bombers=7, poxwalkers=9, gunners=6, mutants=5, crushers=5, bulwarks=4, reapers=6, mauler=5, melee_regular=1, ranged_regular=1 },
+    veteran = { bosses=2, berzerkers=8, hounds=12, netgunners=13, flamers=7, snipers=15, bombers=11, poxwalkers=14, gunners=9, mutants=6, crushers=2, bulwarks=5, reapers=10, mauler=4, melee_regular=0, ranged_regular=0 },
+    zealot  = { bosses=2, berzerkers=8, hounds=12, netgunners=13, flamers=7, snipers=15, bombers=11, poxwalkers=14, gunners=9, mutants=6, crushers=2, bulwarks=5, reapers=10, mauler=4, melee_regular=0, ranged_regular=0 },
+    psyker  = { bosses=2, berzerkers=8, hounds=12, netgunners=13, flamers=7, snipers=15, bombers=11, poxwalkers=14, gunners=9, mutants=6, crushers=2, bulwarks=5, reapers=10, mauler=4, melee_regular=0, ranged_regular=0 },
+    ogryn   = { bosses=4, berzerkers=8, hounds=12, netgunners=13, flamers=7, snipers=15, bombers=11, poxwalkers=14, gunners=9, mutants=6, crushers=0, bulwarks=5, reapers=10, mauler=0, melee_regular=0, ranged_regular=3 },
 }
 
 return {
@@ -109,6 +115,12 @@ return {
                         type = "checkbox",
                         default_value = true
                     },
+                    {
+                        setting_id = "priority_profile",
+                        type = "dropdown",
+                        options = profile_options,
+                        default_value = "auto"
+                    },
                 }
             },
             {
@@ -152,30 +164,7 @@ return {
                 -- the auto fallback when no archetype can be detected).
                 setting_id = "priority_targets",
                 type = "group",
-                sub_widgets = {
-                    {
-                        setting_id = "priority_profile",
-                        type = "dropdown",
-                        options = profile_options,
-                        default_value = "auto"
-                    },
-                    { setting_id = "target_bosses",         type = "dropdown", options = priority_options, default_value = 2 },
-                    { setting_id = "target_berzerkers",     type = "dropdown", options = priority_options, default_value = 4 },
-                    { setting_id = "target_hounds",         type = "dropdown", options = priority_options, default_value = 7 },
-                    { setting_id = "target_netgunners",     type = "dropdown", options = priority_options, default_value = 7 },
-                    { setting_id = "target_flamers",        type = "dropdown", options = priority_options, default_value = 4 },
-                    { setting_id = "target_snipers",        type = "dropdown", options = priority_options, default_value = 8 },
-                    { setting_id = "target_bombers",        type = "dropdown", options = priority_options, default_value = 6 },
-                    { setting_id = "target_poxwalkers",     type = "dropdown", options = priority_options, default_value = 9 },
-                    { setting_id = "target_gunners",        type = "dropdown", options = priority_options, default_value = 5 },
-                    { setting_id = "target_mutants",        type = "dropdown", options = priority_options, default_value = 3 },
-                    { setting_id = "target_crushers",       type = "dropdown", options = priority_options, default_value = 3 },
-                    { setting_id = "target_bulwarks",       type = "dropdown", options = priority_options, default_value = 3 },
-                    { setting_id = "target_reapers",        type = "dropdown", options = priority_options, default_value = 5 },
-                    { setting_id = "target_mauler",         type = "dropdown", options = priority_options, default_value = 3 },
-                    { setting_id = "target_melee_regular",  type = "dropdown", options = priority_options, default_value = 0 },
-                    { setting_id = "target_ranged_regular", type = "dropdown", options = priority_options, default_value = 0 },
-                }
+                sub_widgets = make_target_widgets("", CLASS_DEFAULTS.veteran)
             },
             {
                 setting_id = "veteran_profile_targets",
@@ -196,6 +185,16 @@ return {
                 setting_id = "ogryn_profile_targets",
                 type = "group",
                 sub_widgets = make_target_widgets("ogryn_", CLASS_DEFAULTS.ogryn)
+            },
+            {
+                setting_id = "adamant_profile_targets",
+                type = "group",
+                sub_widgets = make_target_widgets("adamant_", CLASS_DEFAULTS.veteran)
+            },
+            {
+                setting_id = "broker_profile_targets",
+                type = "group",
+                sub_widgets = make_target_widgets("broker_", CLASS_DEFAULTS.veteran)
             },
         }
     }

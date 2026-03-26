@@ -12,57 +12,23 @@ local loc = {
         de = "Zielt automatisch auf priorisierte Spezialgegner beim Rechtsklick oder mit einer benutzerdefinierten Taste. Enthält optionalen Triggerbot."
     },
 
-    -- Priority Levels
-    Off = {
-        en = "Off",
-        ru = "Выкл",
-        de = "Aus"
-    },
-    Lowest = {
-        en = "Lowest",
-        ru = "Самый низкий",
-        de = "Am niedrigsten"
-    },
-    Lower = {
-        en = "Lower",
-        ru = "Ниже",
-        de = "Niedriger"
-    },
-    Low = {
-        en = "Low",
-        ru = "Низкий",
-        de = "Niedrig"
-    },
-    Medium = {
-        en = "Medium",
-        ru = "Средний",
-        de = "Mittel"
-    },
-    Elevated = {
-        en = "Elevated",
-        ru = "Повышенный",
-        de = "Erhöht"
-    },
-    High = {
-        en = "High",
-        ru = "Высокий",
-        de = "Hoch"
-    },
-    Extreme = {
-        en = "Extreme",
-        ru = "Экстремальный",
-        de = "Extrem"
-    },
-    Ultra = {
-        en = "Ultra",
-        ru = "Ультра",
-        de = "Ultra"
-    },
-    Critical = {
-        en = "Critical",
-        ru = "Критический",
-        de = "Kritisch"
-    },
+    -- Priority Levels (0 = Off, 1–15 = numeric priority; higher wins)
+    Off   = { en = "Off", ru = "Выкл", de = "Aus" },
+    ["1"]  = { en = "1"  },
+    ["2"]  = { en = "2"  },
+    ["3"]  = { en = "3"  },
+    ["4"]  = { en = "4"  },
+    ["5"]  = { en = "5"  },
+    ["6"]  = { en = "6"  },
+    ["7"]  = { en = "7"  },
+    ["8"]  = { en = "8"  },
+    ["9"]  = { en = "9"  },
+    ["10"] = { en = "10" },
+    ["11"] = { en = "11" },
+    ["12"] = { en = "12" },
+    ["13"] = { en = "13" },
+    ["14"] = { en = "14" },
+    ["15"] = { en = "15" },
     
     -- General Settings
     general_settings = {

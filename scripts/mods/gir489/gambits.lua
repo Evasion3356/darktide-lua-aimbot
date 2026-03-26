@@ -413,7 +413,7 @@ local function can_see_head(enemy_unit, player)
                 if zone_name == HitZone.hit_zone_names.afro then
                     goto continue_can_see
                 end
-                if zone_name == HitZone.hit_zone_names.shield then
+                if zone_name == HitZone.hit_zone_names.shield or zone_name == HitZone.hit_zone_names.captain_void_shield then
                     return false
                 end
                 if unit == enemy_unit then
