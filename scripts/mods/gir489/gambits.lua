@@ -345,6 +345,15 @@ local SPREAD_DEFAULT_FIRST_SHOT_RANDOM_RATIO = 0.4
 local SPREAD_DEFAULT_MAX_YAW_DELTA = 2
 local SPREAD_DEFAULT_MAX_PITCH_DELTA = 3
 
+local function spread_rotation_from_offset(offset, previous_offset, max_delta, around_vector)
+    local diff = math_abs(previous_offset - offset)
+    local lerp_ratio = diff == 0 and 1 or math_min(max_delta, 1)
+    local lerped_offset = math.lerp(previous_offset, offset, lerp_ratio)
+    local rotation = Quaternion(around_vector, math.degrees_to_radians(lerped_offset))
+
+    return rotation
+end
+
 -- Deterministically predict the spread offset that randomized_spread will apply
 -- on the next shot.  Reads component data directly via read_component to avoid
 -- accessing write-handle fields outside the spread system's update phase.
@@ -407,19 +416,19 @@ local function predict_spread_offset(player_unit)
         previous_pitch = pitch_offset
     end
 
-    -- Replicate _rotation_from_offset for yaw
-    local yaw_diff = math_abs(previous_yaw - yaw_offset)
-    local max_yaw_delta = rs.max_yaw_delta or SPREAD_DEFAULT_MAX_YAW_DELTA
-    local yaw_t = yaw_diff <= 0.00001 and 1 or math_min(max_yaw_delta / yaw_diff, 1)
-    local lerped_yaw = math.lerp(previous_yaw, yaw_offset, yaw_t)
-    local yaw_rot = Quaternion(Vector3.up(), math.degrees_to_radians(lerped_yaw))
-
-    -- Replicate _rotation_from_offset for pitch
-    local pitch_diff = math_abs(previous_pitch - pitch_offset)
-    local max_pitch_delta = rs.max_pitch_delta or SPREAD_DEFAULT_MAX_PITCH_DELTA
-    local pitch_t = pitch_diff <= 0.00001 and 1 or math_min(max_pitch_delta / pitch_diff, 1)
-    local lerped_pitch = math.lerp(previous_pitch, pitch_offset, pitch_t)
-    local pitch_rot = Quaternion(Vector3.right(), math.degrees_to_radians(lerped_pitch))
+    local yaw_rot = spread_rotation_from_offset(
+        yaw_offset,
+        previous_yaw,
+        rs.max_yaw_delta or SPREAD_DEFAULT_MAX_YAW_DELTA,
+        Vector3.up()
+    )
+    
+    local pitch_rot = spread_rotation_from_offset(
+        pitch_offset,
+        previous_pitch,
+        rs.max_pitch_delta or SPREAD_DEFAULT_MAX_PITCH_DELTA,
+        Vector3.right()
+    )
 
     -- final = input * pitch * yaw  =>  offset = pitch * yaw
     return Quaternion.multiply(pitch_rot, yaw_rot)
