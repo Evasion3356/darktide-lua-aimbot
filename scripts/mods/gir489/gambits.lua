@@ -113,13 +113,6 @@ local BREED_AIM_ZONES = {
 }
 local DEFAULT_AIM_ZONES = { { type = "node", name = "j_head" } }
 
-local VALID_ARCHETYPES = {
-    veteran = true,
-    zealot  = true,
-    psyker  = true,
-    ogryn   = true,
-}
-
 -- Maps each priority_profile value to the setting-key prefix used in gambits_data.lua.
 -- "custom" uses no prefix (the base priority_targets group).
 local PROFILE_PREFIXES = {
@@ -136,8 +129,7 @@ local function get_player_archetype()
     local player = Managers.player:local_player(1)
     if not player then return nil end
     local profile = player:profile()
-    local name = profile and profile.archetype and profile.archetype.name
-    return VALID_ARCHETYPES[name] and name or nil
+    return profile and profile.archetype and profile.archetype.name
 end
 
 local math_rad = math.rad
