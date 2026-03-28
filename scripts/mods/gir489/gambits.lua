@@ -1,4 +1,5 @@
 local mod = get_mod("darktide-lua-gambits")
+local Health = require("scripts/utilities/health")
 local HitZone = require("scripts/utilities/attack/hit_zone")
 local Breed = require("scripts/utilities/breed")
 local HitScan = require("scripts/utilities/attack/hit_scan")
@@ -83,13 +84,6 @@ local BREED_PRIORITY_MAP = {
     renegade_rifleman = "target_ranged_regular" -- Scab Shooter
 }
 
-local BLOCKING_BREEDS = {
-    chaos_ogryn_bulwark = true,
-    chaos_ogryn_executor = true,
-    chaos_daemonhost = true,
-    chaos_mutator_daemonhost = true,
-}
-
 local POXBURSTER_BREEDS = {
     chaos_poxwalker_bomber = true,
 }
@@ -97,6 +91,13 @@ local POXBURSTER_BREEDS = {
 local DAEMONHOST_BREEDS = {
     chaos_daemonhost = true,
     chaos_mutator_daemonhost = true,
+}
+
+-- Breeds whose optimal ranged aim zone is not j_head.
+-- BoN: weakspot (back blob) is ranged ×1.0 vs head ×0.5, and is the only zone
+-- that accumulates stagger (only_accumulate_stagger_on_weakspot = true).
+local BREED_AIM_ZONE = {
+    chaos_beast_of_nurgle = HitZone.hit_zone_names.weakspot,
 }
 
 local VALID_ARCHETYPES = {
@@ -269,17 +270,20 @@ local function get_all_enemies()
                 if POXBURSTER_BREEDS[breed.name] and not is_poxburster_safe_to_target(unit) then
                     goto next_unit
                 end
+                local aim_zone = BREED_AIM_ZONE[breed.name]
                 n = n + 1
                 local entry = reusable_enemies[n]
                 if entry then
                     entry.unit = unit
                     entry.position = POSITION_LOOKUP[unit]
                     entry.priority = priority
+                    entry.aim_zone = aim_zone
                 else
                     reusable_enemies[n] = {
                         unit = unit,
                         position = POSITION_LOOKUP[unit],
-                        priority = priority
+                        priority = priority,
+                        aim_zone = aim_zone,
                     }
                 end
             end
@@ -412,57 +416,51 @@ local function can_see_head(enemy_unit, player)
     dir = Vector3_normalize(dir)
 
     local physics_world = World_physics_world(Application_main_world())
-    local hits_dynamics = HitScan.raycast(physics_world, shooting_pos, dir, dist, nil, "filter_player_character_shooting_raycast_dynamics", 0, true, player, false)
+    local hits = PhysicsWorld_raycast(physics_world, shooting_pos, dir, dist, "all", "collision_filter", "filter_player_character_shooting_raycast")
 
-    local target_head_hit = nil
-    local closest_blocker_dist = math_huge
-    if hits_dynamics then
-        for i = 1, #hits_dynamics do
-            local hit = hits_dynamics[i]
-            local actor = hit.actor or hit[4]
-            if actor then
-                local unit = Actor_unit(actor)
-                local zone_name = HitZone.get_name(unit, actor)
-                if zone_name == HitZone.hit_zone_names.afro then
-                    goto continue_can_see
-                end
-                if zone_name == HitZone.hit_zone_names.shield or zone_name == HitZone.hit_zone_names.captain_void_shield then
-                    return false
-                end
-                if unit == enemy_unit then
-                    if zone_name == HitZone.hit_zone_names.head then
-                        target_head_hit = hit.distance or hit[2] or 0
-                    end
-                else
-                    -- Check if a Crusher or Bulwark body is in the way
-                    local hit_breed = Breed.unit_breed_or_nil(unit)
-                    if hit_breed and BLOCKING_BREEDS[hit_breed.name] then
-                        local blocker_dist = hit.distance or hit[2] or 0
-                        if blocker_dist < closest_blocker_dist then
-                            closest_blocker_dist = blocker_dist
-                        end
-                    end
-                end
+    if not hits then
+        return true
+    end
+
+    for i = 1, #hits do
+        local hit = hits[i]
+        local actor = hit[4]
+        if actor then
+            local hit_unit = Actor_unit(actor)
+            local hit_zone_name = HitZone.get_name(hit_unit, actor)
+
+            -- Skip afro. Afro is the layer around an enemy the game uses to detect if your shot scares the enemy.
+            if hit_zone_name == HitZone.hit_zone_names.afro then
+                goto continue_can_see
             end
-            ::continue_can_see::
+
+            -- Skip Bulwark shield and Captain Shield. Both waste ammo for the amount of damage returned.
+            if hit_zone_name == HitZone.hit_zone_names.shield or hit_zone_name == HitZone.hit_zone_names.captain_void_shield  then
+                return false
+            end
+
+            -- Skip the local player unit
+            if hit_unit == player.player_unit then
+                goto continue_can_see
+            end
+
+            -- Skip ragdolled units (they no longer physically block shots)
+            if Health.is_ragdolled(hit_unit) then
+                goto continue_can_see
+            end
+
+            -- First non-skipped hit is the target: head is visible
+            if hit_unit == enemy_unit then
+                return true
+            end
+
+            -- First non-skipped hit is something else: shot is obstructed
+            return false
         end
+        ::continue_can_see::
     end
 
-    if not target_head_hit then
-        return false
-    end
-
-    -- A Crusher or Bulwark body is closer than the target's head
-    if closest_blocker_dist < target_head_hit then
-        return false
-    end
-
-    local hit_statics, hit_pos, hit_dist = PhysicsWorld_raycast(physics_world, shooting_pos, dir, dist, "closest", "types", "statics", "collision_filter", "filter_player_character_shooting_raycast_statics")
-
-    if hit_statics and hit_dist < target_head_hit then
-        return false
-    end
-
+    -- Ray reached the head with nothing in the way
     return true
 end
 
