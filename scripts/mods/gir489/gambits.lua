@@ -15,6 +15,13 @@ local aim_button_pressed = false
 local triggerbot_pressed = false
 local has_target = false
 local last_semi_auto_fire_time = 0
+-- Zone-lock hysteresis: when the preferred zone is briefly occluded by a
+-- physics reaction (e.g. BoN blob dipping on hit), hold the last confirmed
+-- zone for up to ZONE_GRACE_FRAMES before allowing a zone switch.
+local last_aim_unit = nil
+local last_aim_zone = nil
+local last_aim_zone_blocked_frames = 0
+local ZONE_GRACE_FRAMES = 10
 
 local BREED_PRIORITY_MAP = {
     -- Hound
@@ -93,12 +100,18 @@ local DAEMONHOST_BREEDS = {
     chaos_mutator_daemonhost = true,
 }
 
--- Breeds whose optimal ranged aim zone is not j_head.
--- BoN: weakspot (back blob) is ranged ×1.0 vs head ×0.5, and is the only zone
--- that accumulates stagger (only_accumulate_stagger_on_weakspot = true).
-local BREED_AIM_ZONE = {
-    chaos_beast_of_nurgle = HitZone.hit_zone_names.weakspot,
+-- Per-breed ordered aim zone list. Each zone is tried front-to-back; the first
+-- one with a clear line-of-sight wins. "actor" zones use Actor.world_bounds()
+-- to get the actual collision-shape center (not the actor origin/attachment);
+-- "node" zones use Unit.world_position() on the named skeleton node.
+local BREED_AIM_ZONES = {
+    chaos_beast_of_nurgle = {
+        { type = "actor", name = "c_weakspot",      top_bias = 0.5 }, -- blob on back (1.0x ranged mult)
+        { type = "actor", name = "c_tonguespline03"               }, -- mid-tongue (visible when BoN faces player)
+        { type = "node",  name = "j_head" },
+    },
 }
+local DEFAULT_AIM_ZONES = { { type = "node", name = "j_head" } }
 
 local VALID_ARCHETYPES = {
     veteran = true,
@@ -143,6 +156,7 @@ local ScriptUnit_extension = ScriptUnit.extension
 local Unit_node = Unit.node
 local Unit_world_position = Unit.world_position
 local Actor_unit = Actor.unit
+local Actor_world_bounds = Actor.world_bounds
 local PhysicsWorld_raycast = PhysicsWorld.raycast
 local World_physics_world = World.physics_world
 local Application_main_world = Application.main_world
@@ -270,20 +284,17 @@ local function get_all_enemies()
                 if POXBURSTER_BREEDS[breed.name] and not is_poxburster_safe_to_target(unit) then
                     goto next_unit
                 end
-                local aim_zone = BREED_AIM_ZONE[breed.name]
                 n = n + 1
                 local entry = reusable_enemies[n]
                 if entry then
                     entry.unit = unit
                     entry.position = POSITION_LOOKUP[unit]
                     entry.priority = priority
-                    entry.aim_zone = aim_zone
                 else
                     reusable_enemies[n] = {
                         unit = unit,
                         position = POSITION_LOOKUP[unit],
-                        priority = priority,
-                        aim_zone = aim_zone,
+                        priority = priority
                     }
                 end
             end
@@ -401,78 +412,112 @@ local function predict_spread_offset(player_unit)
     return Quaternion.multiply(pitch_rot, yaw_rot)
 end
 
-local function can_see_head(enemy_unit, player)
-    local head_node = Unit_node(enemy_unit, "j_head")
-    if not head_node then
-        return false
-    end
-
-    local unit_data_ext = ScriptUnit_extension(player.player_unit, "unit_data_system")
-    local shooting_pos = unit_data_ext:read_component("first_person").position
-
-    local head_pos = Unit_world_position(enemy_unit, head_node)
-    local dir = head_pos - shooting_pos
-    local dist = Vector3_length(dir)
-    dir = Vector3_normalize(dir)
-
-    local physics_world = World_physics_world(Application_main_world())
-    local hits = PhysicsWorld_raycast(physics_world, shooting_pos, dir, dist, "all", "collision_filter", "filter_player_character_shooting_raycast")
-
-    if not hits then
-        return true
-    end
-
-    for i = 1, #hits do
-        local hit = hits[i]
-        local actor = hit[4]
-        if actor then
-            local hit_unit = Actor_unit(actor)
-            local hit_zone_name = HitZone.get_name(hit_unit, actor)
-
-            -- Skip afro. Afro is the layer around an enemy the game uses to detect if your shot scares the enemy.
-            if hit_zone_name == HitZone.hit_zone_names.afro then
-                goto continue_can_see
-            end
-
-            -- Skip Bulwark shield and Captain Shield. Both waste ammo for the amount of damage returned.
-            if hit_zone_name == HitZone.hit_zone_names.shield or hit_zone_name == HitZone.hit_zone_names.captain_void_shield  then
-                return false
-            end
-
-            -- Skip the local player unit
-            if hit_unit == player.player_unit then
-                goto continue_can_see
-            end
-
-            -- Skip ragdolled units (they no longer physically block shots)
-            if Health.is_ragdolled(hit_unit) then
-                goto continue_can_see
-            end
-
-            -- First non-skipped hit is the target: head is visible
-            if hit_unit == enemy_unit then
-                return true
-            end
-
-            -- First non-skipped hit is something else: shot is obstructed
-            return false
+-- Returns the world-space aim position for a zone descriptor, or nil if the
+-- actor/node doesn't exist on this unit. Actor zones with a top_bias field
+-- offset upward by (top_bias * z_half_extent) from the AABB center, placing
+-- the aim point in the visible upper portion of the collision volume.
+local function get_aim_position(unit, zone)
+    if zone.type == "actor" then
+        local actor = Unit.actor(unit, zone.name)
+        if not actor then return nil end
+        if zone.top_bias and Actor.is_dynamic(actor) then
+            local center, half = Actor_world_bounds(actor)
+            return Vector3(center.x, center.y, center.z + half.z * zone.top_bias)
         end
-        ::continue_can_see::
+        return Actor.is_dynamic(actor) and Actor.center_of_mass(actor) or Actor.position(actor)
+    else
+        local node = Unit_node(unit, zone.name)
+        if not node then return nil end
+        return Unit_world_position(unit, node)
     end
-
-    -- Ray reached the head with nothing in the way
-    return true
 end
 
-local function look_at_enemy_head(enemy_unit, player, shooting_pos, player_unit)
-    local head_node = Unit_node(enemy_unit, "j_head")
-    if not head_node then
-        return
-    end
-    local head_pos = Unit_world_position(enemy_unit, head_node)
-    local dir = Vector3_normalize(head_pos - shooting_pos)
+-- Iterates the ordered zones list and returns (true, zone) for the first zone
+-- with an unobstructed line of sight from shooting_pos, or (false, nil).
+local function can_see_aim_target(enemy_unit, player, shooting_pos, zones)
+    local physics_world = World_physics_world(Application_main_world())
+    for _, zone in ipairs(zones) do
+        local aim_pos = get_aim_position(enemy_unit, zone)
+        if not aim_pos then
+            goto next_zone
+        end
 
-    -- Desired aim direction toward head
+        -- For actor zones pre-fetch the exact actor so we can confirm LOS by
+        -- actor identity. This avoids relying on hit_zone_names enums which may
+        -- not contain breed-specific zone names (e.g. BoN "tongue").
+        local target_actor = zone.type == "actor" and Unit.actor(enemy_unit, zone.name) or nil
+
+        do
+            local dir = aim_pos - shooting_pos
+            local dist = Vector3_length(dir)
+            dir = Vector3_normalize(dir)
+
+            local hits = PhysicsWorld_raycast(physics_world, shooting_pos, dir, dist, "all", "collision_filter", "filter_player_character_shooting_raycast")
+
+            if not hits then
+                return true, zone
+            end
+
+            local blocked = false
+            for i = 1, #hits do
+                local hit = hits[i]
+                local actor = hit[4]
+                if actor then
+                    local hit_unit = Actor_unit(actor)
+                    local hit_zone_name = HitZone.get_name(hit_unit, actor)
+
+                    if hit_zone_name == HitZone.hit_zone_names.afro then
+                        goto continue_ray
+                    end
+
+                    if hit_zone_name == HitZone.hit_zone_names.shield or hit_zone_name == HitZone.hit_zone_names.captain_void_shield then
+                        blocked = true
+                        break
+                    end
+
+                    if hit_unit == player.player_unit then
+                        goto continue_ray
+                    end
+
+                    if Health.is_ragdolled(hit_unit) then
+                        goto continue_ray
+                    end
+
+                    if hit_unit == enemy_unit then
+                        if target_actor then
+                            -- Only accept LOS if the ray hit the specific actor we're
+                            -- targeting. Any other actor on this unit means the target
+                            -- is occluded by the body; fall through to the next zone.
+                            if actor == target_actor then
+                                return true, zone
+                            end
+                            blocked = true
+                            break
+                        end
+                        return true, zone
+                    end
+
+                    blocked = true
+                    break
+                end
+                ::continue_ray::
+            end
+
+            if not blocked then
+                return true, zone
+            end
+        end
+
+        ::next_zone::
+    end
+    return false, nil
+end
+
+local function look_at_aim_target(enemy_unit, zone, player, shooting_pos, player_unit)
+    local aim_pos = get_aim_position(enemy_unit, zone)
+    if not aim_pos then return end
+
+    local dir = Vector3_normalize(aim_pos - shooting_pos)
     local base_pitch = math_asin(dir.z)
     local base_yaw = math_atan2(dir.y, dir.x) - HALF_PI
 
@@ -480,8 +525,6 @@ local function look_at_enemy_head(enemy_unit, player, shooting_pos, player_unit)
     local recoil_component = unit_data_ext:read_component("recoil")
     local sway_component = unit_data_ext:read_component("sway")
 
-    -- Deterministically compensate for spread by predicting the offset
-    -- and pre-adjusting the aim direction so it cancels out on the next shot
     if cached_settings.enable_spread_compensation then
         local spread_offset = predict_spread_offset(player_unit)
         if spread_offset then
@@ -582,14 +625,65 @@ local function auto_aim_priority_targets(player_unit)
     for i = 1, enemy_count do
         local enemy = enemies[i]
         if not fov_check_enabled or is_in_fov(enemy.unit, shooting_pos, camera_forward, min_dot) then
-            if can_see_head(enemy.unit, player) then
+            local unit_data_ext2 = ScriptUnit_has_extension(enemy.unit, "unit_data_system")
+            local breed = unit_data_ext2 and unit_data_ext2:breed()
+            local zones = (breed and BREED_AIM_ZONES[breed.name]) or DEFAULT_AIM_ZONES
+
+            local visible, resolved_zone = can_see_aim_target(enemy.unit, player, shooting_pos, zones)
+            local has_lock = last_aim_unit == enemy.unit and last_aim_zone ~= nil
+
+            if visible then
+                -- Determine priority indices (lower index = higher priority in zones list).
+                local new_idx = #zones + 1
+                for k = 1, #zones do
+                    if zones[k] == resolved_zone then new_idx = k; break end
+                end
+                local lock_idx = #zones + 1
+                if has_lock then
+                    for k = 1, #zones do
+                        if zones[k] == last_aim_zone then lock_idx = k; break end
+                    end
+                end
+
+                if new_idx <= lock_idx then
+                    -- Same or higher-priority zone visible: accept immediately.
+                    -- This upgrades back to c_weakspot the moment it re-appears,
+                    -- even if a lower-priority zone (j_head) was the current lock.
+                    last_aim_unit = enemy.unit
+                    last_aim_zone = resolved_zone
+                    last_aim_zone_blocked_frames = 0
+                    has_target = true
+                    look_at_aim_target(enemy.unit, resolved_zone, player, shooting_pos, player_unit)
+                    return
+                elseif has_lock and last_aim_zone_blocked_frames < ZONE_GRACE_FRAMES then
+                    -- Only a lower-priority fallback is visible; hold the locked zone
+                    -- to avoid downgrading due to transient occlusion (e.g. blob dip).
+                    last_aim_zone_blocked_frames = last_aim_zone_blocked_frames + 1
+                    has_target = true
+                    look_at_aim_target(enemy.unit, last_aim_zone, player, shooting_pos, player_unit)
+                    return
+                else
+                    -- Grace expired or no lock: accept the lower-priority zone.
+                    last_aim_unit = enemy.unit
+                    last_aim_zone = resolved_zone
+                    last_aim_zone_blocked_frames = 0
+                    has_target = true
+                    look_at_aim_target(enemy.unit, resolved_zone, player, shooting_pos, player_unit)
+                    return
+                end
+            elseif has_lock and last_aim_zone_blocked_frames < ZONE_GRACE_FRAMES then
+                -- Nothing visible at all; hold locked zone during grace.
+                last_aim_zone_blocked_frames = last_aim_zone_blocked_frames + 1
                 has_target = true
-                look_at_enemy_head(enemy.unit, player, shooting_pos, player_unit)
+                look_at_aim_target(enemy.unit, last_aim_zone, player, shooting_pos, player_unit)
                 return
             end
         end
     end
 
+    last_aim_unit = nil
+    last_aim_zone = nil
+    last_aim_zone_blocked_frames = 0
     has_target = false
 end
 
@@ -880,6 +974,9 @@ mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, u
     if should_aim and (not cached_settings.require_main_weapon or is_main_weapon_equipped()) then
         auto_aim_priority_targets(unit)
     else
+        last_aim_unit = nil
+        last_aim_zone = nil
+        last_aim_zone_blocked_frames = 0
         has_target = false
     end
 end)
