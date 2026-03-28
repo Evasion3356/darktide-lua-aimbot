@@ -15,6 +15,8 @@ local aim_button_pressed = false
 local triggerbot_pressed = false
 local has_target = false
 local last_semi_auto_fire_time = 0
+local pending_aim_yaw = nil
+local pending_aim_pitch = nil
 -- Zone-lock hysteresis: when the preferred zone is briefly occluded by a
 -- physics reaction (e.g. BoN blob dipping on hit), hold the last confirmed
 -- zone for up to ZONE_GRACE_FRAMES before allowing a zone switch.
@@ -194,6 +196,32 @@ refresh_settings()
 
 mod.on_setting_changed = function(setting_id)
     refresh_settings()
+end
+
+local function get_alive_player_unit(player)
+    local player_unit = player and player.player_unit
+    if not player_unit or not ALIVE[player_unit] then
+        return nil
+    end
+
+    return player_unit
+end
+
+local function should_activate_autoaim()
+    local use_mouse2 = cached_settings.use_mouse2_fallback
+    return (use_mouse2 and Mouse.button(Mouse.button_index("right")) > 0.5) or (not use_mouse2 and aim_button_pressed)
+end
+
+local function is_same_local_player(player, local_player)
+    if not player or not local_player then
+        return false
+    end
+
+    if player == local_player then
+        return true
+    end
+
+    return player:peer_id() == local_player:peer_id() and player:local_player_id() == local_player:local_player_id()
 end
 
 local function get_daemonhost_priority(unit, priority)
@@ -507,15 +535,24 @@ end
 
 local function look_at_aim_target(enemy_unit, zone, player, shooting_pos, player_unit)
     local aim_pos = get_aim_position(enemy_unit, zone)
-    if not aim_pos then return end
+    if not aim_pos then
+        return nil, nil
+    end
 
     local dir = Vector3_normalize(aim_pos - shooting_pos)
     local base_pitch = math_asin(dir.z)
     local base_yaw = math_atan2(dir.y, dir.x) - HALF_PI
 
     local unit_data_ext = ScriptUnit_extension(player_unit, "unit_data_system")
+    if not unit_data_ext then
+        return nil, nil
+    end
+
     local recoil_component = unit_data_ext:read_component("recoil")
     local sway_component = unit_data_ext:read_component("sway")
+    if not recoil_component or not sway_component then
+        return nil, nil
+    end
 
     if cached_settings.enable_spread_compensation then
         local spread_offset = predict_spread_offset(player_unit)
@@ -528,7 +565,19 @@ local function look_at_aim_target(enemy_unit, zone, player, shooting_pos, player
         end
     end
 
-    player:set_orientation(base_yaw - recoil_component.yaw_offset - sway_component.offset_x, base_pitch - recoil_component.pitch_offset - sway_component.offset_y, 0)
+    return base_yaw - recoil_component.yaw_offset - sway_component.offset_x, base_pitch - recoil_component.pitch_offset - sway_component.offset_y
+end
+
+local function set_pending_aim_orientation(enemy_unit, zone, player, shooting_pos, player_unit)
+    local target_yaw, target_pitch = look_at_aim_target(enemy_unit, zone, player, shooting_pos, player_unit)
+    if not target_yaw or not target_pitch then
+        return false
+    end
+
+    pending_aim_yaw = target_yaw
+    pending_aim_pitch = target_pitch
+
+    return true
 end
 
 local function get_fire_interval()
@@ -590,6 +639,9 @@ local function are_teammates_dead()
 end
 
 local function auto_aim_priority_targets(player_unit)
+    pending_aim_yaw = nil
+    pending_aim_pitch = nil
+
     local player = Managers.player:local_player(1)
     if not player or not player.player_unit then
         has_target = false
@@ -644,31 +696,35 @@ local function auto_aim_priority_targets(player_unit)
                     last_aim_unit = enemy.unit
                     last_aim_zone = resolved_zone
                     last_aim_zone_blocked_frames = 0
-                    has_target = true
-                    look_at_aim_target(enemy.unit, resolved_zone, player, shooting_pos, player_unit)
-                    return
+                    if set_pending_aim_orientation(enemy.unit, resolved_zone, player, shooting_pos, player_unit) then
+                        has_target = true
+                        return
+                    end
                 elseif has_lock and last_aim_zone_blocked_frames < ZONE_GRACE_FRAMES then
                     -- Only a lower-priority fallback is visible; hold the locked zone
                     -- to avoid downgrading due to transient occlusion (e.g. blob dip).
                     last_aim_zone_blocked_frames = last_aim_zone_blocked_frames + 1
-                    has_target = true
-                    look_at_aim_target(enemy.unit, last_aim_zone, player, shooting_pos, player_unit)
-                    return
+                    if set_pending_aim_orientation(enemy.unit, last_aim_zone, player, shooting_pos, player_unit) then
+                        has_target = true
+                        return
+                    end
                 else
                     -- Grace expired or no lock: accept the lower-priority zone.
                     last_aim_unit = enemy.unit
                     last_aim_zone = resolved_zone
                     last_aim_zone_blocked_frames = 0
-                    has_target = true
-                    look_at_aim_target(enemy.unit, resolved_zone, player, shooting_pos, player_unit)
-                    return
+                    if set_pending_aim_orientation(enemy.unit, resolved_zone, player, shooting_pos, player_unit) then
+                        has_target = true
+                        return
+                    end
                 end
             elseif has_lock and last_aim_zone_blocked_frames < ZONE_GRACE_FRAMES then
                 -- Nothing visible at all; hold locked zone during grace.
                 last_aim_zone_blocked_frames = last_aim_zone_blocked_frames + 1
-                has_target = true
-                look_at_aim_target(enemy.unit, last_aim_zone, player, shooting_pos, player_unit)
-                return
+                if set_pending_aim_orientation(enemy.unit, last_aim_zone, player, shooting_pos, player_unit) then
+                    has_target = true
+                    return
+                end
             end
         end
     end
@@ -954,21 +1010,53 @@ end
 mod:hook("InputService", "_get", _get)
 mod:hook("InputService", "_get_simulate", _get)
 
-mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, unit, dt, t, frame)
-    local player = Managers.player:local_player(1)
-    if not player or not player:unit_is_alive() then
-        return
+mod:hook("HumanGameplay", "fixed_update", function(func, self, game_dt, game_t, fixed_frame)
+    local player = self and self._player
+    local local_player = Managers.player:local_player_safe(1)
+    local player_unit = get_alive_player_unit(player)
+
+    if not player_unit or not is_same_local_player(player, local_player) then
+        has_target = false
+        last_aim_unit = nil
+        last_aim_zone = nil
+        last_aim_zone_blocked_frames = 0
+        pending_aim_yaw = nil
+        pending_aim_pitch = nil
+        return func(self, game_dt, game_t, fixed_frame)
     end
 
-    local use_mouse2 = cached_settings.use_mouse2_fallback
-    local should_aim = (use_mouse2 and Mouse.button(Mouse.button_index("right")) > 0.5) or (not use_mouse2 and aim_button_pressed)
+    local should_aim = should_activate_autoaim()
 
-    if should_aim and (not cached_settings.require_main_weapon or is_main_weapon_equipped()) then
-        auto_aim_priority_targets(unit)
-    else
+    if should_aim and cached_settings.require_main_weapon and not is_main_weapon_equipped() then
+        should_aim = false
+    end
+
+    if not should_aim then
         last_aim_unit = nil
         last_aim_zone = nil
         last_aim_zone_blocked_frames = 0
         has_target = false
+        pending_aim_yaw = nil
+        pending_aim_pitch = nil
+        return func(self, game_dt, game_t, fixed_frame)
     end
+
+    auto_aim_priority_targets(player_unit)
+
+    if pending_aim_yaw == nil or pending_aim_pitch == nil then
+        return func(self, game_dt, game_t, fixed_frame)
+    end
+
+    local orientation = player:get_orientation()
+    local old_yaw = orientation.yaw
+    local old_pitch = orientation.pitch
+    local old_roll = orientation.roll
+
+    player:set_orientation(pending_aim_yaw, pending_aim_pitch, old_roll)
+
+    local result = func(self, game_dt, game_t, fixed_frame)
+
+    player:set_orientation(old_yaw, old_pitch, old_roll)
+
+    return result
 end)
