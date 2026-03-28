@@ -2,7 +2,6 @@ local mod = get_mod("darktide-lua-gambits")
 local Health = require("scripts/utilities/health")
 local HitZone = require("scripts/utilities/attack/hit_zone")
 local Breed = require("scripts/utilities/breed")
-local HitScan = require("scripts/utilities/attack/hit_scan")
 local WeaponTemplate = require("scripts/utilities/weapon/weapon_template")
 local Recoil = require("scripts/utilities/recoil")
 local Sway = require("scripts/utilities/sway")
@@ -136,7 +135,6 @@ local math_rad = math.rad
 local math_cos = math.cos
 local math_atan2 = math.atan2
 local math_asin = math.asin
-local math_huge = math.huge
 local math_sin = math.sin
 local math_abs = math.abs
 local math_min = math.min
@@ -436,6 +434,9 @@ local function classify_los_hit(actor, player_unit, enemy_unit, target_actor)
     if not actor then return "skip" end
 
     local hit_unit = Actor_unit(actor)
+    if not hit_unit then
+        return "blocked"
+    end
     local zone_name = HitZone.get_name(hit_unit, actor)
 
     if zone_name == HitZone.hit_zone_names.afro then
@@ -824,18 +825,10 @@ local function is_reticle_on_enemy()
     local direction = Quaternion_forward(ray_rotation)
 
     local physics_world = World_physics_world(Application_main_world())
-    local hits = HitScan.raycast(physics_world, shooting_pos, direction, max_distance, nil, "filter_player_character_shooting_raycast_dynamics", 0, true, player, false)
+    local hits = PhysicsWorld_raycast(physics_world, shooting_pos, direction, max_distance, "all", "collision_filter", "filter_player_character_shooting_raycast")
 
     if not hits or #hits == 0 then
         return false
-    end
-
-    -- Hoist static raycast out of the loop-direction and position don't change per hit.
-    -- Use "closest" instead of "all" since we only need the nearest wall distance.
-    local wall_distance = math_huge
-    local hit_statics, _, static_dist = PhysicsWorld_raycast(physics_world, shooting_pos, direction, max_distance, "closest", "types", "statics", "collision_filter", "filter_player_character_shooting_raycast_statics")
-    if hit_statics then
-        wall_distance = static_dist
     end
 
     local weakspot_only = cached_settings.triggerbot_weakspot_only
@@ -844,14 +837,14 @@ local function is_reticle_on_enemy()
     for i = 1, #hits do
         local hit = hits[i]
         if hit then
-            local actor = hit.actor or hit[4]
+            local actor = hit[4]
             local result = classify_los_hit(actor, player.player_unit, nil, nil)
 
             if result == "blocked" then
                 return false
             elseif result == "hit" then
                 local hit_unit = Actor_unit(actor)
-                if hit_unit and ScriptUnit_has_extension(hit_unit, "health_system") then
+                if ScriptUnit_has_extension(hit_unit, "health_system") then
                     local health_ext = ScriptUnit_extension(hit_unit, "health_system")
                     if health_ext:is_alive() then
                         local breed = Breed.unit_breed_or_nil(hit_unit)
@@ -873,11 +866,6 @@ local function is_reticle_on_enemy()
                                 if POXBURSTER_BREEDS[breed_name] and not is_poxburster_safe_to_target(hit_unit) then
                                     goto continue_hit_loop
                                 end
-                            end
-
-                            local hit_distance = hit.distance or hit[2] or 0
-                            if wall_distance < hit_distance then
-                                goto continue_hit_loop
                             end
 
                             return true
