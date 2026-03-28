@@ -18,6 +18,7 @@ local last_semi_auto_fire_time = 0
 local last_targetable_time = 0
 local pending_aim_yaw = nil
 local pending_aim_pitch = nil
+local move_input_correction = nil
 
 local FULL_AUTO_FIRE_GRACE_TIME = 0.12
 
@@ -150,7 +151,9 @@ local Actor_world_bounds = Actor.world_bounds
 local PhysicsWorld_raycast = PhysicsWorld.raycast
 local World_physics_world = World.physics_world
 local Application_main_world = Application.main_world
+local Quaternion_from_yaw_pitch_roll = Quaternion.from_yaw_pitch_roll
 local Quaternion_forward = Quaternion.forward
+local Quaternion_right = Quaternion.right
 local table_sort = table.sort
 local pairs = pairs
 local next = next
@@ -219,6 +222,20 @@ local function is_same_local_player(player, local_player)
     end
 
     return player:peer_id() == local_player:peer_id() and player:local_player_id() == local_player:local_player_id()
+end
+
+local function apply_movement_correction(move_input, source_yaw, target_yaw)
+    if not move_input or (move_input.x == 0 and move_input.y == 0) or source_yaw == target_yaw then
+        return move_input
+    end
+
+    local source_rotation = Quaternion_from_yaw_pitch_roll(source_yaw, 0, 0)
+    local target_rotation = Quaternion_from_yaw_pitch_roll(target_yaw, 0, 0)
+    local desired_world_move = Quaternion_right(source_rotation) * move_input.x + Quaternion_forward(source_rotation) * move_input.y
+    local corrected_x = Vector3_dot(Quaternion_right(target_rotation), desired_world_move)
+    local corrected_y = Vector3_dot(Quaternion_forward(target_rotation), desired_world_move)
+
+    return Vector3(corrected_x, corrected_y, 0)
 end
 
 local function get_daemonhost_priority(unit, priority)
@@ -993,6 +1010,21 @@ end
 mod:hook("InputService", "_get", _get)
 mod:hook("InputService", "_get_simulate", _get)
 
+mod:hook("HumanUnitInput", "get", function(func, self, action)
+    local result = func(self, action)
+
+    if action ~= "move" then
+        return result
+    end
+
+    local correction = move_input_correction
+    if not correction or correction.frame ~= self._frame or correction.player ~= self._player then
+        return result
+    end
+
+    return apply_movement_correction(result, correction.source_yaw, correction.target_yaw)
+end)
+
 mod:hook("HumanGameplay", "fixed_update", function(func, self, game_dt, game_t, fixed_frame)
     local player = self and self._player
     local local_player = Managers.player:local_player_safe(1)
@@ -1002,6 +1034,7 @@ mod:hook("HumanGameplay", "fixed_update", function(func, self, game_dt, game_t, 
         has_target = false
         pending_aim_yaw = nil
         pending_aim_pitch = nil
+        move_input_correction = nil
         return func(self, game_dt, game_t, fixed_frame)
     end
 
@@ -1015,6 +1048,7 @@ mod:hook("HumanGameplay", "fixed_update", function(func, self, game_dt, game_t, 
         has_target = false
         pending_aim_yaw = nil
         pending_aim_pitch = nil
+        move_input_correction = nil
         return func(self, game_dt, game_t, fixed_frame)
     end
 
@@ -1025,6 +1059,7 @@ mod:hook("HumanGameplay", "fixed_update", function(func, self, game_dt, game_t, 
     end
 
     if pending_aim_yaw == nil or pending_aim_pitch == nil then
+        move_input_correction = nil
         return func(self, game_dt, game_t, fixed_frame)
     end
 
@@ -1032,6 +1067,13 @@ mod:hook("HumanGameplay", "fixed_update", function(func, self, game_dt, game_t, 
     local old_yaw = orientation.yaw
     local old_pitch = orientation.pitch
     local old_roll = orientation.roll
+
+    move_input_correction = {
+        player = player,
+        frame = fixed_frame,
+        source_yaw = old_yaw,
+        target_yaw = pending_aim_yaw,
+    }
 
     player:set_orientation(pending_aim_yaw, pending_aim_pitch, old_roll)
 
