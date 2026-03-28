@@ -93,7 +93,7 @@ local loc = {
     },
     disable_when_teammates_are_dead_description = {
         en = "If enabled, auto-aim will be disabled when any teammate is dead.",
-        ru = "Если включено, автонаведение будет отключено, когда любой товарищ",
+        ru = "Если включено, автонаведение будет отключено, когда любой товарищ по команде мёртв или связан.",
         de = "Wenn aktiviert, wird das Auto-Zielen deaktiviert, wenn ein Teammitglied tot ist."
     },
 
@@ -322,9 +322,9 @@ local loc = {
         de = "Normale Nahkampfgegner anvisieren"
     },
     target_melee_regular_description = {
-        en = "Automatically aim at regular melee enemies (e.g., Chaos Cultists, Plague Zombies).",
-        ru = "Автоматически наводиться на обычных ближних врагов (например, культистов Хаоса, чумных зомби).",
-        de = "Automatisch normale Nahkampfgegner anvisieren (z.B. Chaos-Kultisten, Seuchen-Zombies)."
+        en = "Automatically aim at regular melee enemies (e.g., Poxwalkers, Groaners, Dreg Bruisers).",
+        ru = "Автоматически наводиться на обычных ближних врагов (например, Поксвокеров, Стонущих, Дрег-Громил).",
+        de = "Automatisch normale Nahkampfgegner anvisieren (z.B. Poxwalker, Groaner, Dreg-Schläger)."
     },
     target_ranged_regular = {
         en = "Target Regular Ranged Enemies",
@@ -332,9 +332,9 @@ local loc = {
         de = "Normale Fernkampfgegner anvisieren"
     },
     target_ranged_regular_description = {
-        en = "Automatically aim at regular ranged enemies (e.g., Plague Monks, Chaos Warriors).",
-        ru = "Автоматически наводиться на обычных дальних врагов (например, чумных монахов, воинов Хаоса).",
-        de = "Automatisch normale Fernkampfgegner anvisieren (z.B. Seuchen-Mönche, Chaos-Krieger)."
+        en = "Automatically aim at regular ranged enemies (e.g., Dreg Stalkers, Scab Shooters, Scab Stalkers).",
+        ru = "Автоматически наводиться на обычных дальних врагов (например, Дрег-Охотников, Скаб-Стрелков, Скаб-Охотников).",
+        de = "Automatisch normale Fernkampfgegner anvisieren (z.B. Dreg-Jäger, Scab-Schützen, Scab-Jäger)."
     },
 
     -- Profile selector

@@ -158,7 +158,10 @@ local next = next
 -- Pre-allocated reusable table and comparator to reduce GC pressure
 local reusable_enemies = {}
 local function priority_comparator(a, b)
-    return a.priority > b.priority
+    if a.priority ~= b.priority then
+        return a.priority > b.priority
+    end
+    return a.distance_sq < b.distance_sq
 end
 
 -- Cached settings, refreshed on change
@@ -258,6 +261,9 @@ local function get_all_enemies()
         end
     end
 
+    local player = Managers.player:local_player(1)
+    local player_pos = player and player.player_unit and POSITION_LOOKUP[player.player_unit]
+
     local n = 0
 
     for unit, _ in pairs(entities) do
@@ -269,22 +275,33 @@ local function get_all_enemies()
                 goto next_unit
             end
 
-            local priority = get_breed_priority(breed.name, unit)
+            local breed_name = breed.name
+            local priority = get_breed_priority(breed_name, unit)
             if priority > 0 then
-                if POXBURSTER_BREEDS[breed.name] and not is_poxburster_safe_to_target(unit) then
+                if POXBURSTER_BREEDS[breed_name] and not is_poxburster_safe_to_target(unit) then
                     goto next_unit
+                end
+                local pos = POSITION_LOOKUP[unit]
+                local dist_sq = 0
+                if player_pos and pos then
+                    local diff = pos - player_pos
+                    dist_sq = Vector3_dot(diff, diff)
                 end
                 n = n + 1
                 local entry = reusable_enemies[n]
                 if entry then
                     entry.unit = unit
-                    entry.position = POSITION_LOOKUP[unit]
+                    entry.position = pos
                     entry.priority = priority
+                    entry.breed_name = breed_name
+                    entry.distance_sq = dist_sq
                 else
                     reusable_enemies[n] = {
                         unit = unit,
-                        position = POSITION_LOOKUP[unit],
-                        priority = priority
+                        position = pos,
+                        breed_name = breed_name,
+                        priority = priority,
+                        distance_sq = dist_sq,
                     }
                 end
             end
@@ -425,9 +442,9 @@ end
 -- Classifies a single raycast hit actor for LOS / enemy-detection purposes.
 -- Handles the universal pre-checks shared by can_see_aim_target and
 -- is_reticle_on_enemy so neither caller duplicates the logic.
---   enemy_unit   – if non-nil, only a hit on this unit counts as "hit"; any
+--   enemy_unit   ï¿½ if non-nil, only a hit on this unit counts as "hit"; any
 --                  other solid unit returns "blocked".
---   target_actor – only meaningful when enemy_unit is non-nil; when set the
+--   target_actor ï¿½ only meaningful when enemy_unit is non-nil; when set the
 --                  hit actor must also match exactly to return "hit".
 -- Returns "skip", "blocked", or "hit".
 local function classify_los_hit(actor, player_unit, enemy_unit, target_actor)
@@ -624,9 +641,7 @@ local function auto_aim_priority_targets(player_unit)
     for i = 1, enemy_count do
         local enemy = enemies[i]
         if not fov_check_enabled or is_in_fov(enemy.unit, shooting_pos, camera_forward, min_dot) then
-            local unit_data_ext2 = ScriptUnit_has_extension(enemy.unit, "unit_data_system")
-            local breed = unit_data_ext2 and unit_data_ext2:breed()
-            local zones = (breed and BREED_AIM_ZONES[breed.name]) or DEFAULT_AIM_ZONES
+            local zones = (enemy.breed_name and BREED_AIM_ZONES[enemy.breed_name]) or DEFAULT_AIM_ZONES
 
             local visible, resolved_zone = can_see_aim_target(enemy.unit, player, shooting_pos, zones)
             local has_lock = last_aim_unit == enemy.unit and last_aim_zone ~= nil
