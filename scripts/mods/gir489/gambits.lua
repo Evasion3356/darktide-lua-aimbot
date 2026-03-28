@@ -15,8 +15,11 @@ local aim_button_pressed = false
 local triggerbot_pressed = false
 local has_target = false
 local last_semi_auto_fire_time = 0
+local last_targetable_time = 0
 local pending_aim_yaw = nil
 local pending_aim_pitch = nil
+
+local FULL_AUTO_FIRE_GRACE_TIME = 0.12
 
 local BREED_PRIORITY_MAP = {
     -- Hound
@@ -154,6 +157,7 @@ local next = next
 
 -- Pre-allocated reusable table and comparator to reduce GC pressure
 local reusable_enemies = {}
+local reusable_seen_units = {}
 local function priority_comparator(a, b)
     return a.priority > b.priority
 end
@@ -273,46 +277,53 @@ local function get_all_enemies()
         return reusable_enemies, 0
     end
 
-    local entities = extension_manager:get_entities("MinionHuskLocomotionExtension")
-    if not next(entities) then
-        entities = extension_manager:get_entities("MinionLocomotionExtension")
-        if not next(entities) then
-            return reusable_enemies, 0
-        end
-    end
-
     local n = 0
+    table.clear(reusable_seen_units)
 
-    for unit, _ in pairs(entities) do
-        local health_extension = ScriptUnit_has_extension(unit, "health_system")
-        if health_extension and health_extension:is_alive() then
-            local unit_data_ext = ScriptUnit_extension(unit, "unit_data_system")
-            local breed = unit_data_ext:breed()
-            if not breed or breed.breed_type == "player" or (breed.name and breed.name:find("hazard")) then
-                goto next_unit
-            end
+    local entity_sets = {
+        extension_manager:get_entities("MinionHuskLocomotionExtension"),
+        extension_manager:get_entities("MinionLocomotionExtension"),
+    }
 
-            local priority = get_breed_priority(breed.name, unit)
-            if priority > 0 then
-                if POXBURSTER_BREEDS[breed.name] and not is_poxburster_safe_to_target(unit) then
+    for _, entities in ipairs(entity_sets) do
+        if entities and next(entities) then
+            for unit, _ in pairs(entities) do
+                if reusable_seen_units[unit] then
                     goto next_unit
                 end
-                n = n + 1
-                local entry = reusable_enemies[n]
-                if entry then
-                    entry.unit = unit
-                    entry.position = POSITION_LOOKUP[unit]
-                    entry.priority = priority
-                else
-                    reusable_enemies[n] = {
-                        unit = unit,
-                        position = POSITION_LOOKUP[unit],
-                        priority = priority
-                    }
-                end
-            end
+                reusable_seen_units[unit] = true
 
-            ::next_unit::
+                local health_extension = ScriptUnit_has_extension(unit, "health_system")
+                if health_extension and health_extension:is_alive() then
+                    local unit_data_ext = ScriptUnit_extension(unit, "unit_data_system")
+                    local breed = unit_data_ext:breed()
+                    if not breed or breed.breed_type == "player" or (breed.name and breed.name:find("hazard")) then
+                        goto next_unit
+                    end
+
+                    local priority = get_breed_priority(breed.name, unit)
+                    if priority > 0 then
+                        if POXBURSTER_BREEDS[breed.name] and not is_poxburster_safe_to_target(unit) then
+                            goto next_unit
+                        end
+                        n = n + 1
+                        local entry = reusable_enemies[n]
+                        if entry then
+                            entry.unit = unit
+                            entry.position = POSITION_LOOKUP[unit]
+                            entry.priority = priority
+                        else
+                            reusable_enemies[n] = {
+                                unit = unit,
+                                position = POSITION_LOOKUP[unit],
+                                priority = priority
+                            }
+                        end
+                    end
+                end
+
+                ::next_unit::
+            end
         end
     end
 
@@ -776,7 +787,7 @@ local function is_main_weapon_equipped()
     return wielded_slot == "slot_secondary"
 end
 
-local function is_reticle_on_enemy()
+local function is_reticle_on_enemy(optional_ignore_priority)
     local player = Managers.player:local_player(1)
     if not player or not player.player_unit then
         return false
@@ -850,7 +861,7 @@ local function is_reticle_on_enemy()
     end
 
     local weakspot_only = cached_settings.triggerbot_weakspot_only
-    local respect_priority = cached_settings.triggerbot_respect_priority
+    local respect_priority = cached_settings.triggerbot_respect_priority and not optional_ignore_priority
 
     for i = 1, #hits do
         local hit = hits[i]
@@ -937,21 +948,40 @@ local _get = function(func, self, action_name)
         return func(self, action_name)
     end
 
+    local weapon_template, fire_mode = get_current_weapon_info()
+    local current_time = Managers.time:time("main") or 0
     local can_fire = (cached_settings.triggerbot_use_raycast and is_reticle_on_enemy()) or has_target
+    if can_fire then
+        last_targetable_time = current_time
+    end
+
+    if action_name == "action_one_hold" and (fire_mode == "charge" or fire_mode == "full_auto") then
+        if can_fire then
+            return true
+        end
+
+        local player = Managers.player:local_player_safe(1)
+        local player_unit = player and player.player_unit
+        if player_unit then
+            local unit_data_ext = ScriptUnit_has_extension(player_unit, "unit_data_system")
+            local shooting_status = unit_data_ext and unit_data_ext:read_component("shooting_status")
+            if shooting_status and shooting_status.shooting and current_time - last_targetable_time <= FULL_AUTO_FIRE_GRACE_TIME then
+                return true
+            end
+        end
+
+        return func(self, action_name)
+    end
+
     if not can_fire then
         return func(self, action_name)
     end
 
-    local weapon_template, fire_mode = get_current_weapon_info()
-    if action_name == "action_one_hold" and (fire_mode == "charge" or fire_mode == "full_auto") then
-        return true
-    end
-
     if action_name == "action_one_pressed" and fire_mode == "semi_auto" then
         -- For semi-auto weapons, fire once per latency cycle to avoid sending too many fire events
-        local fire_interval, current_time = get_fire_interval()
-        if current_time - last_semi_auto_fire_time >= fire_interval then
-            last_semi_auto_fire_time = current_time
+        local fire_interval, semi_auto_time = get_fire_interval()
+        if semi_auto_time - last_semi_auto_fire_time >= fire_interval then
+            last_semi_auto_fire_time = semi_auto_time
             return true
         end
         return false
@@ -989,6 +1019,10 @@ mod:hook("HumanGameplay", "fixed_update", function(func, self, game_dt, game_t, 
     end
 
     auto_aim_priority_targets(player_unit)
+
+    if not has_target and is_reticle_on_enemy(true) then
+        has_target = true
+    end
 
     if pending_aim_yaw == nil or pending_aim_pitch == nil then
         return func(self, game_dt, game_t, fixed_frame)
