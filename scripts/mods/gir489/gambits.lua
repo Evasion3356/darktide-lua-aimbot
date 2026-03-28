@@ -17,13 +17,6 @@ local has_target = false
 local last_semi_auto_fire_time = 0
 local pending_aim_yaw = nil
 local pending_aim_pitch = nil
--- Zone-lock hysteresis: when the preferred zone is briefly occluded by a
--- physics reaction (e.g. BoN blob dipping on hit), hold the last confirmed
--- zone for up to ZONE_GRACE_FRAMES before allowing a zone switch.
-local last_aim_unit = nil
-local last_aim_zone = nil
-local last_aim_zone_blocked_frames = 0
-local ZONE_GRACE_FRAMES = 10
 
 local BREED_PRIORITY_MAP = {
     -- Hound
@@ -674,54 +667,8 @@ local function auto_aim_priority_targets(player_unit)
             local zones = (breed and BREED_AIM_ZONES[breed.name]) or DEFAULT_AIM_ZONES
 
             local visible, resolved_zone = can_see_aim_target(enemy.unit, player, shooting_pos, zones)
-            local has_lock = last_aim_unit == enemy.unit and last_aim_zone ~= nil
-
             if visible then
-                -- Determine priority indices (lower index = higher priority in zones list).
-                local new_idx = #zones + 1
-                for k = 1, #zones do
-                    if zones[k] == resolved_zone then new_idx = k; break end
-                end
-                local lock_idx = #zones + 1
-                if has_lock then
-                    for k = 1, #zones do
-                        if zones[k] == last_aim_zone then lock_idx = k; break end
-                    end
-                end
-
-                if new_idx <= lock_idx then
-                    -- Same or higher-priority zone visible: accept immediately.
-                    -- This upgrades back to c_weakspot the moment it re-appears,
-                    -- even if a lower-priority zone (j_head) was the current lock.
-                    last_aim_unit = enemy.unit
-                    last_aim_zone = resolved_zone
-                    last_aim_zone_blocked_frames = 0
-                    if set_pending_aim_orientation(enemy.unit, resolved_zone, player, shooting_pos, player_unit) then
-                        has_target = true
-                        return
-                    end
-                elseif has_lock and last_aim_zone_blocked_frames < ZONE_GRACE_FRAMES then
-                    -- Only a lower-priority fallback is visible; hold the locked zone
-                    -- to avoid downgrading due to transient occlusion (e.g. blob dip).
-                    last_aim_zone_blocked_frames = last_aim_zone_blocked_frames + 1
-                    if set_pending_aim_orientation(enemy.unit, last_aim_zone, player, shooting_pos, player_unit) then
-                        has_target = true
-                        return
-                    end
-                else
-                    -- Grace expired or no lock: accept the lower-priority zone.
-                    last_aim_unit = enemy.unit
-                    last_aim_zone = resolved_zone
-                    last_aim_zone_blocked_frames = 0
-                    if set_pending_aim_orientation(enemy.unit, resolved_zone, player, shooting_pos, player_unit) then
-                        has_target = true
-                        return
-                    end
-                end
-            elseif has_lock and last_aim_zone_blocked_frames < ZONE_GRACE_FRAMES then
-                -- Nothing visible at all; hold locked zone during grace.
-                last_aim_zone_blocked_frames = last_aim_zone_blocked_frames + 1
-                if set_pending_aim_orientation(enemy.unit, last_aim_zone, player, shooting_pos, player_unit) then
+                if set_pending_aim_orientation(enemy.unit, resolved_zone, player, shooting_pos, player_unit) then
                     has_target = true
                     return
                 end
@@ -729,9 +676,6 @@ local function auto_aim_priority_targets(player_unit)
         end
     end
 
-    last_aim_unit = nil
-    last_aim_zone = nil
-    last_aim_zone_blocked_frames = 0
     has_target = false
 end
 
@@ -1017,9 +961,6 @@ mod:hook("HumanGameplay", "fixed_update", function(func, self, game_dt, game_t, 
 
     if not player_unit or not is_same_local_player(player, local_player) then
         has_target = false
-        last_aim_unit = nil
-        last_aim_zone = nil
-        last_aim_zone_blocked_frames = 0
         pending_aim_yaw = nil
         pending_aim_pitch = nil
         return func(self, game_dt, game_t, fixed_frame)
@@ -1032,9 +973,6 @@ mod:hook("HumanGameplay", "fixed_update", function(func, self, game_dt, game_t, 
     end
 
     if not should_aim then
-        last_aim_unit = nil
-        last_aim_zone = nil
-        last_aim_zone_blocked_frames = 0
         has_target = false
         pending_aim_yaw = nil
         pending_aim_pitch = nil
