@@ -424,6 +424,46 @@ local function get_aim_position(unit, zone)
     end
 end
 
+-- Classifies a single raycast hit actor for LOS / enemy-detection purposes.
+-- Handles the universal pre-checks shared by can_see_aim_target and
+-- is_reticle_on_enemy so neither caller duplicates the logic.
+--   enemy_unit   – if non-nil, only a hit on this unit counts as "hit"; any
+--                  other solid unit returns "blocked".
+--   target_actor – only meaningful when enemy_unit is non-nil; when set the
+--                  hit actor must also match exactly to return "hit".
+-- Returns "skip", "blocked", or "hit".
+local function classify_los_hit(actor, player_unit, enemy_unit, target_actor)
+    if not actor then return "skip" end
+
+    local hit_unit = Actor_unit(actor)
+    local zone_name = HitZone.get_name(hit_unit, actor)
+
+    if zone_name == HitZone.hit_zone_names.afro then
+        return "skip"
+    end
+    if zone_name == HitZone.hit_zone_names.shield or
+       zone_name == HitZone.hit_zone_names.captain_void_shield then
+        return "blocked"
+    end
+    if hit_unit == player_unit then
+        return "skip"
+    end
+    if Health.is_ragdolled(hit_unit) then
+        return "skip"
+    end
+
+    if enemy_unit then
+        if hit_unit ~= enemy_unit then
+            return "blocked"
+        end
+        if target_actor and actor ~= target_actor then
+            return "blocked"
+        end
+    end
+
+    return "hit"
+end
+
 -- Iterates the ordered zones list and returns (true, zone) for the first zone
 -- with an unobstructed line of sight from shooting_pos, or (false, nil).
 local function can_see_aim_target(enemy_unit, player, shooting_pos, zones)
@@ -452,47 +492,13 @@ local function can_see_aim_target(enemy_unit, player, shooting_pos, zones)
 
             local blocked = false
             for i = 1, #hits do
-                local hit = hits[i]
-                local actor = hit[4]
-                if actor then
-                    local hit_unit = Actor_unit(actor)
-                    local hit_zone_name = HitZone.get_name(hit_unit, actor)
-
-                    if hit_zone_name == HitZone.hit_zone_names.afro then
-                        goto continue_ray
-                    end
-
-                    if hit_zone_name == HitZone.hit_zone_names.shield or hit_zone_name == HitZone.hit_zone_names.captain_void_shield then
-                        blocked = true
-                        break
-                    end
-
-                    if hit_unit == player.player_unit then
-                        goto continue_ray
-                    end
-
-                    if Health.is_ragdolled(hit_unit) then
-                        goto continue_ray
-                    end
-
-                    if hit_unit == enemy_unit then
-                        if target_actor then
-                            -- Only accept LOS if the ray hit the specific actor we're
-                            -- targeting. Any other actor on this unit means the target
-                            -- is occluded by the body; fall through to the next zone.
-                            if actor == target_actor then
-                                return true, zone
-                            end
-                            blocked = true
-                            break
-                        end
-                        return true, zone
-                    end
-
+                local result = classify_los_hit(hits[i][4], player.player_unit, enemy_unit, target_actor)
+                if result == "hit" then
+                    return true, zone
+                elseif result == "blocked" then
                     blocked = true
                     break
                 end
-                ::continue_ray::
             end
 
             if not blocked then
@@ -808,14 +814,6 @@ local function is_reticle_on_enemy()
                 end
             end
 
-            -- Apply predicted spread so triggerbot ray matches actual next shot prediction
-            if cached_settings.enable_spread_compensation then
-                local spread_offset = predict_spread_offset(player.player_unit)
-                if spread_offset then
-                    ray_rotation = Quaternion.multiply(ray_rotation, spread_offset)
-                end
-            end
-
             -- Get max distance from weapon template
             if weapon_template.hit_scan_template and weapon_template.hit_scan_template.range then
                 max_distance = weapon_template.hit_scan_template.range
@@ -847,29 +845,22 @@ local function is_reticle_on_enemy()
         local hit = hits[i]
         if hit then
             local actor = hit.actor or hit[4]
-            if actor then
+            local result = classify_los_hit(actor, player.player_unit, nil, nil)
+
+            if result == "blocked" then
+                return false
+            elseif result == "hit" then
                 local hit_unit = Actor_unit(actor)
-                -- Skip hits on the player itself
-                if hit_unit == player.player_unit then
-                    goto continue_hit_loop
-                end
                 if hit_unit and ScriptUnit_has_extension(hit_unit, "health_system") then
                     local health_ext = ScriptUnit_extension(hit_unit, "health_system")
                     if health_ext:is_alive() then
                         local breed = Breed.unit_breed_or_nil(hit_unit)
                         if breed and not Breed.is_player(breed) and not breed.name:find("hazard") then
-                            local zone_name = HitZone.get_name(hit_unit, actor)
-
-                            if zone_name == HitZone.hit_zone_names.afro then
-                                goto continue_hit_loop
-                            end
-
-                            if zone_name == HitZone.hit_zone_names.shield then
-                                return false
-                            end
-
-                            if weakspot_only and zone_name ~= HitZone.hit_zone_names.head and zone_name ~= HitZone.hit_zone_names.weakspot then
-                                goto continue_hit_loop
+                            if weakspot_only then
+                                local zone_name = HitZone.get_name(hit_unit, actor)
+                                if zone_name ~= HitZone.hit_zone_names.head and zone_name ~= HitZone.hit_zone_names.weakspot then
+                                    goto continue_hit_loop
+                                end
                             end
 
                             local breed_name = breed.name
