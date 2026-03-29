@@ -719,8 +719,8 @@ local function predict_crit_wait(player_unit)
                             hp, n_dmg, c_dmg or 0,
                             shot_sec and string.format("%.3f", shot_sec) or "nil",
                             wait_seconds, wait_shots, normal_stk, crit_stk,
-                            normal_stk <= crit_stk and "FIRE" or "WAIT"))
-                        if normal_stk <= crit_stk then
+                            normal_stk <= 2 and "FIRE" or "WAIT"))
+                        if normal_stk <= 2 then
                             local msg = string.format(
                                 "SKIP_WAIT hp=%.1f n=%.1f c=%.1f normal_stk=%d crit_stk=%d wait=%.1fs",
                                 hp, n_dmg, c_dmg or 0, normal_stk, crit_stk, wait_seconds)
