@@ -8,6 +8,9 @@ local Sway = require("scripts/utilities/sway")
 local Suppression = require("scripts/utilities/attack/suppression")
 local WeaponMovementState = require("scripts/extension_systems/weapon/utilities/weapon_movement_state")
 local CriticalStrike = require("scripts/utilities/attack/critical_strike")
+local DamageProfile = require("scripts/utilities/attack/damage_profile")
+local DamageCalculation = require("scripts/utilities/attack/damage_calculation")
+local PowerLevelSettings = require("scripts/settings/damage/power_level_settings")
 
 local HALF_PI = math.pi / 2
 
@@ -491,6 +494,123 @@ local function _has_surgical_perk(buff_ext)
     return false
 end
 
+-- Returns the time between shots (seconds) from the weapon handling template.
+-- Prefers auto_fire_time for full-auto weapons, falls back to fire_time.
+-- Returns the time in seconds between shots for the current weapon/action.
+-- For auto weapons: uses fire_rate.auto_fire_time or fire_rate.fire_time from the
+-- handling template. For single-shot weapons (e.g. bolter killshot), those are
+-- nil/0 so we fall back to the shoot action's chain_time — the minimum time the
+-- game enforces before you can fire again.
+local function _shot_interval(weapon_handling_template, shoot_action)
+    local fire_rate = weapon_handling_template and weapon_handling_template.fire_rate
+    if fire_rate then
+        local aft = fire_rate.auto_fire_time
+        if aft and aft > 0 then return aft end
+        local ft = fire_rate.fire_time
+        if ft and ft > 0 then return ft end
+    end
+    -- Fallback: chain_time for the ADS repeat-fire chain action (zoom_shoot),
+    -- or the hip-fire equivalent (shoot_pressed).
+    if shoot_action and shoot_action.allowed_chain_actions then
+        local chains = shoot_action.allowed_chain_actions
+        local ct = (chains.zoom_shoot and chains.zoom_shoot.chain_time)
+                or (chains.shoot_pressed and chains.shoot_pressed.chain_time)
+        if ct and ct > 0 then return ct end
+    end
+    return nil
+end
+
+-- Estimates (normal_damage, crit_damage) per hit against target_unit using
+-- the current weapon's damage profile and the target's armor type.
+-- Values are in the same internal HP units as health_ext:current_health().
+-- Returns (nil, nil) when the required data is unavailable.
+local function _estimate_shot_damage(player_unit, target_unit)
+    local unit_data_ext = ScriptUnit_extension(player_unit, "unit_data_system")
+    if not unit_data_ext then
+        CommandWindow.print("[dmgest] FAIL: no unit_data_ext")
+        return nil, nil
+    end
+
+    local weapon_action_comp = unit_data_ext:read_component("weapon_action")
+    if not weapon_action_comp then
+        CommandWindow.print("[dmgest] FAIL: no weapon_action component")
+        return nil, nil
+    end
+
+    local weapon_template = WeaponTemplate.current_weapon_template(weapon_action_comp)
+    if not weapon_template or not weapon_template.actions then
+        CommandWindow.print("[dmgest] FAIL: no weapon_template/actions")
+        return nil, nil
+    end
+
+    -- Prefer the zoomed (ADS) shoot action; fall back to hip-fire
+    local actions = weapon_template.actions
+    local shoot_action = actions.action_shoot_zoomed or actions.action_shoot_hip
+    if not shoot_action then
+        CommandWindow.print("[dmgest] FAIL: no shoot action found")
+        return nil, nil
+    end
+
+    local fire_config = shoot_action.fire_configuration
+    if not fire_config then
+        CommandWindow.print("[dmgest] FAIL: no fire_configuration")
+        return nil, nil
+    end
+
+    local hst = fire_config.hit_scan_template
+    local damage_profile = hst and hst.damage and hst.damage.impact
+                           and hst.damage.impact.damage_profile
+    if not damage_profile or not damage_profile.targets then
+        CommandWindow.print("[dmgest] FAIL: no damage_profile or targets (hst=" .. tostring(hst) .. ")")
+        return nil, nil
+    end
+
+    local power_level = (hst and hst.power_level) or PowerLevelSettings.default_power_level
+
+    local breed = Breed.unit_breed_or_nil(target_unit)
+    local armor_type = (breed and breed.armor_type) or "unarmored"
+
+    -- Use the first/default target settings from the damage profile
+    local target_settings = damage_profile.targets[1] or damage_profile.targets.default_target
+    if not target_settings then
+        CommandWindow.print("[dmgest] FAIL: no target_settings in damage_profile.targets")
+        return nil, nil
+    end
+
+    local lerp_values = DamageProfile.lerp_values(damage_profile, player_unit)
+
+    -- Base damage at unarmored, no range drop-off (close range)
+    local base_dmg = DamageCalculation.base_ui_damage(
+        damage_profile, target_settings, power_level, nil, nil, lerp_values)
+    if not base_dmg or base_dmg <= 0 then
+        CommandWindow.print("[dmgest] FAIL: base_dmg=" .. tostring(base_dmg))
+        return nil, nil
+    end
+
+    -- Armor damage modifiers for normal and crit
+    local adm_normal = DamageProfile.armor_damage_modifier(
+        "attack", damage_profile, target_settings, lerp_values,
+        armor_type, false, nil, false, 0)
+    local adm_crit = DamageProfile.armor_damage_modifier(
+        "attack", damage_profile, target_settings, lerp_values,
+        armor_type, true, nil, false, 0)
+
+    -- Finesse multiplier added by a crit (no headshot)
+    local crit_finesse = DamageCalculation.ui_finesse_multiplier(
+        damage_profile, target_settings, armor_type, false, true, lerp_values)
+
+    local normal_damage = base_dmg * adm_normal
+    local crit_damage   = base_dmg * adm_crit * crit_finesse
+
+    CommandWindow.print(string.format(
+        "[dmgest] profile=%s armor=%s pl=%d base=%.2f adm_n=%.3f adm_c=%.3f finesse=%.3f => n=%.2f c=%.2f",
+        tostring(damage_profile.name), tostring(armor_type), power_level,
+        base_dmg, adm_normal, adm_crit, crit_finesse,
+        normal_damage, crit_damage))
+
+    return normal_damage, crit_damage
+end
+
 -- Predicts whether the next shot will crit, and if not, whether waiting for
 -- additional Surgical stacks (aim-time crit chance) can produce one.
 --
@@ -571,6 +691,57 @@ local function predict_crit_wait(player_unit)
         if prd_would_crit(math.round_with_precision(test_chance, 2), prd_state, seed) then
             local target_time = (current_stacks + extra) * SURGICAL_DURATION_PER_STACK
             local wait_seconds = math.max(target_time - time_lapsed, 0)
+
+            -- If there is an actual delay, check whether waiting for the crit
+            -- is faster than just firing regular shots.
+            if wait_seconds > 0 and last_aim_unit then
+                local health_ext = ScriptUnit_has_extension(last_aim_unit, "health_system")
+                if health_ext and health_ext:is_alive() then
+                    local hp = health_ext:current_health()
+                    local n_dmg, c_dmg = _estimate_shot_damage(player_unit, last_aim_unit)
+                    if n_dmg and n_dmg > 0 then
+                        -- Shots-to-kill on normal path
+                        local normal_stk = math.ceil(hp / n_dmg)
+                        -- Shots-to-kill on crit path:
+                        --   wait_shots wasted + 1 crit shot + remainder at normal pace
+                        local weapon_action_comp = unit_data_ext:read_component("weapon_action")
+                        local cur_wt = weapon_action_comp and WeaponTemplate.current_weapon_template(weapon_action_comp)
+                        local shoot_action = cur_wt and cur_wt.actions and
+                            (cur_wt.actions.action_shoot_zoomed or cur_wt.actions.action_shoot_hip)
+                        local shot_sec = _shot_interval(weapon_handling_template, shoot_action)
+                        local wait_shots = shot_sec and math.floor(wait_seconds / shot_sec) or 0
+                        local remaining = math.max(hp - (c_dmg or 0), 0)
+                        local crit_stk = wait_shots + 1
+                            + (remaining > 0 and math.ceil(remaining / n_dmg) or 0)
+                        CommandWindow.print(string.format(
+                            "[worth] hp=%.2f n=%.2f c=%.2f shot_sec=%s wait=%.2fs"
+                            .. " wait_shots=%d normal_stk=%d crit_stk=%d => %s",
+                            hp, n_dmg, c_dmg or 0,
+                            shot_sec and string.format("%.3f", shot_sec) or "nil",
+                            wait_seconds, wait_shots, normal_stk, crit_stk,
+                            normal_stk <= crit_stk and "FIRE" or "WAIT"))
+                        if normal_stk <= crit_stk then
+                            local msg = string.format(
+                                "SKIP_WAIT hp=%.1f n=%.1f c=%.1f normal_stk=%d crit_stk=%d wait=%.1fs",
+                                hp, n_dmg, c_dmg or 0, normal_stk, crit_stk, wait_seconds)
+                            if _last_crit_log ~= msg then
+                                _last_crit_log = msg
+                                mod:info("[surgical] %s", msg)
+                            end
+                            return "fire"
+                        end
+                    else
+                        CommandWindow.print("[worth] damage estimate unavailable, defaulting to WAIT")
+                    end
+                else
+                    CommandWindow.print("[worth] target dead or no health_ext, defaulting to WAIT")
+                end
+            else
+                CommandWindow.print(string.format(
+                    "[worth] wait_seconds=%.2f last_aim_unit=%s => no check needed",
+                    wait_seconds, tostring(last_aim_unit)))
+            end
+
             local msg = string.format("WAIT %.1fs stacks=%d->%d chance=%.0f%%->%.0f%% prd=%s",
                 wait_seconds, current_stacks, current_stacks + extra,
                 rounded * 100, math.round_with_precision(test_chance, 2) * 100,
