@@ -7,6 +7,7 @@ local Recoil = require("scripts/utilities/recoil")
 local Sway = require("scripts/utilities/sway")
 local Suppression = require("scripts/utilities/attack/suppression")
 local WeaponMovementState = require("scripts/extension_systems/weapon/utilities/weapon_movement_state")
+local CriticalStrike = require("scripts/utilities/attack/critical_strike")
 
 local HALF_PI = math.pi / 2
 
@@ -417,6 +418,179 @@ local function predict_spread_offset(player_unit)
 
     -- final = input * pitch * yaw  =>  offset = pitch * yaw
     return Quaternion.multiply(pitch_rot, yaw_rot)
+end
+
+-- Surgical perk (chance_based_on_aim_time) constants
+local SURGICAL_MAX_STACKS = 10
+local SURGICAL_CHANCE_PER_STACK = 0.10
+local SURGICAL_DURATION_PER_STACK = 1.0
+
+-- Inlined P2C table from PseudoRandomDistribution — maps floor(chance*100) to
+-- the per-attempt constant C used by the PRD algorithm.  Avoids requiring the
+-- game module (its transitive NetworkConstants dependency fails under the mod
+-- framework's require).
+local PRD_P2C = {
+    0.0001560416916765, 0.0006200876164356, 0.0013861777203907, 0.0024485554716477,
+    0.0038016583035531, 0.0054401086148994, 0.0073587052890401, 0.009552415696806,
+    0.0120163681507952, 0.0147458447810727, 0.0177362748045691, 0.0209832281625322,
+    0.0244824095022856, 0.028229652481288,  0.0322209143730877, 0.0364522709562386,
+    0.0409199116686026, 0.045620135010803,  0.0505493441851718, 0.0557040429497818,
+    0.0610808317144988, 0.0666764036215081, 0.0724875433984468, 0.0785111206640039,
+    0.084744091852317,  0.091183460913123,  0.097826380485467,  0.104670227374915,
+    0.1117117582421034, 0.118949192725404,  0.1263793161208353, 0.1340008645349125,
+    0.1418051956867528, 0.1498100879493791, 0.1579830981257471, 0.166328776806438,
+    0.1749092435951354, 0.1836246523722508, 0.1924859579708838, 0.201547413607754,
+    0.2109200313959977, 0.2203645774003486, 0.2298986763626535, 0.2395401522844584,
+    0.2493069984401633, 0.2598723505886277, 0.270452936701194,  0.2810076352015464,
+    0.2915522666427177, 0.302103025348742,  0.3126766393399556, 0.3232905471447631,
+    0.3341199609425926, 0.3473699930849595, 0.3603978509331687, 0.3732168294719914,
+    0.3858396117819544, 0.3982783321856844, 0.4105446351769761, 0.4226497308103743,
+    0.434604447180966,  0.4464192805893383, 0.4581044439647123, 0.4696699141100894,
+    0.4811254783372292, 0.4924807810774478, 0.5074626865671641, 0.5294117647058825,
+    0.5507246376811594, 0.5714285714285715, 0.591549295774648,  0.6111111111111113,
+    0.6301369863013697, 0.6486486486486487, 0.6666666666666666, 0.6842105263157897,
+    0.7012987012987013, 0.717948717948718,  0.7341772151898737, 0.75,
+    0.7654320987654323, 0.7804878048780489, 0.795180722891566,  0.8095238095238093,
+    0.8235294117647058, 0.8372093023255812, 0.850574712643678,  0.8636363636363638,
+    0.8764044943820226, 0.8888888888888891, 0.9010989010989011, 0.9130434782608697,
+    0.9247311827956991, 0.9361702127659574, 0.9473684210526315, 0.9583333333333331,
+    0.9690721649484535, 0.979591836734694,  0.98989898989899,
+}
+
+-- Pure re-implementation of PseudoRandomDistribution.flip_coin.
+-- Returns is_crit (bool) only — we don't need the mutated state for prediction.
+local function prd_would_crit(chance, state, seed)
+    if chance >= 1 then return true end
+    if chance <= 0 then return false end
+
+    local c = PRD_P2C[math.floor(chance * 100)]
+    if not c then return false end
+
+    local math_next_random = math.next_random
+    local new_seed, value = math_next_random(seed)
+
+    if value < c then
+        _, value = math_next_random(new_seed)
+        return value < chance
+    end
+
+    local n = state or math.floor(chance / c)
+    _, value = math_next_random(new_seed)
+    return value < n * c
+end
+
+-- Returns true if the player has any active crit_chance_based_on_aim_time buff.
+local function _has_surgical_perk(buff_ext)
+    local buffs = buff_ext:buffs()
+    for i = 1, #buffs do
+        local name = buffs[i]:template().name
+        if name and name:find("crit_chance_based_on_aim_time", 1, true) then
+            return true
+        end
+    end
+    return false
+end
+
+-- Predicts whether the next shot will crit, and if not, whether waiting for
+-- additional Surgical stacks (aim-time crit chance) can produce one.
+--
+-- Reads the critical_strike component's seed and prd_state, then simulates
+-- the PRD flip_coin at increasing chance values (one per hypothetical
+-- additional Surgical stack).
+--
+-- Returns:
+--   "fire"          -- current chance already crits, or no Surgical / not
+--                      aiming / waiting won't help; fire to advance the seed
+--   "wait", seconds -- hold fire this many more seconds for a guaranteed crit
+-- Tracks last logged decision to avoid spamming identical lines
+local _last_crit_log = nil
+
+local function predict_crit_wait(player_unit)
+    local player = Managers.player:local_player(1)
+    if not player or not player.player_unit then
+        return "fire"
+    end
+
+    local unit_data_ext = ScriptUnit_extension(player_unit, "unit_data_system")
+    local buff_ext = ScriptUnit_extension(player_unit, "buff_system")
+
+    -- Early-out: guaranteed or prevented crits
+    if buff_ext:has_keyword("guaranteed_critical_strike") or
+       buff_ext:has_keyword("guaranteed_ranged_critical_strike") then
+        return "fire"
+    end
+    if buff_ext:has_keyword("prevent_critical_strike") then
+        return "fire"
+    end
+
+    local critical_strike_comp = unit_data_ext:read_component("critical_strike")
+    local seed = critical_strike_comp.seed
+    local prd_state = critical_strike_comp.prd_state
+
+    local weapon_ext = ScriptUnit_has_extension(player_unit, "weapon_system")
+    if not weapon_ext then
+        return "fire"
+    end
+    local weapon_handling_template = weapon_ext:weapon_handling_template() or {}
+
+    -- Current crit chance (all active buffs including current Surgical stacks)
+    local current_chance = CriticalStrike.chance(player, weapon_handling_template, true, false, false)
+    local rounded = math.round_with_precision(current_chance, 2)
+
+    -- Check if the next shot already crits at current chance
+    if prd_would_crit(rounded, prd_state, seed) then
+        local msg = string.format("CRIT_NOW chance=%.0f%% prd=%s", rounded * 100, tostring(prd_state))
+        if _last_crit_log ~= msg then
+            _last_crit_log = msg
+            mod:info("[surgical] %s", msg)
+        end
+        return "fire"
+    end
+
+    -- No Surgical perk → waiting won't change anything
+    if not _has_surgical_perk(buff_ext) then
+        return "fire"
+    end
+
+    -- Must be aiming to gain stacks
+    local alternate_fire = unit_data_ext:read_component("alternate_fire")
+    if not alternate_fire or not alternate_fire.is_active then
+        return "fire"
+    end
+
+    -- Current Surgical stack count from aim time
+    local action_shoot = unit_data_ext:read_component("action_shoot")
+    local t = Managers.time:time("gameplay")
+    local check_time = math.max(alternate_fire.start_t, action_shoot.fire_last_t)
+    local time_lapsed = t - check_time
+    local current_stacks = math.clamp(math.floor(time_lapsed / SURGICAL_DURATION_PER_STACK), 0, SURGICAL_MAX_STACKS)
+
+    -- Simulate each additional stack to see if any produces a crit
+    for extra = 1, SURGICAL_MAX_STACKS - current_stacks do
+        local test_chance = math.clamp(current_chance + extra * SURGICAL_CHANCE_PER_STACK, 0, 1)
+        if prd_would_crit(math.round_with_precision(test_chance, 2), prd_state, seed) then
+            local target_time = (current_stacks + extra) * SURGICAL_DURATION_PER_STACK
+            local wait_seconds = math.max(target_time - time_lapsed, 0)
+            local msg = string.format("WAIT %.1fs stacks=%d->%d chance=%.0f%%->%.0f%% prd=%s",
+                wait_seconds, current_stacks, current_stacks + extra,
+                rounded * 100, math.round_with_precision(test_chance, 2) * 100,
+                tostring(prd_state))
+            if _last_crit_log ~= msg then
+                _last_crit_log = msg
+                mod:info("[surgical] %s", msg)
+            end
+            return "wait", wait_seconds
+        end
+    end
+
+    -- No reachable stack count produces a crit; fire to advance the seed
+    local msg = string.format("ADVANCE chance=%.0f%% prd=%s stacks=%d/%d",
+        rounded * 100, tostring(prd_state), current_stacks, SURGICAL_MAX_STACKS)
+    if _last_crit_log ~= msg then
+        _last_crit_log = msg
+        mod:info("[surgical] %s", msg)
+    end
+    return "fire"
 end
 
 -- Returns the world-space aim position for a zone descriptor, or nil if the
@@ -925,6 +1099,16 @@ local _get = function(func, self, action_name)
     local can_fire = (cached_settings.triggerbot_use_raycast and is_reticle_on_enemy()) or has_target
     if not can_fire then
         return func(self, action_name)
+    end
+
+    -- Surgical crit-wait: suppress fire if waiting for more stacks will crit
+    local player_unit = Managers.player:local_player(1)
+    player_unit = player_unit and player_unit.player_unit
+    if player_unit then
+        local crit_action = predict_crit_wait(player_unit)
+        if crit_action == "wait" then
+            return false
+        end
     end
 
     local weapon_template, fire_mode = get_current_weapon_info()
