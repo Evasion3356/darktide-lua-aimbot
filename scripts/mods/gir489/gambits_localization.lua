@@ -12,57 +12,23 @@ local loc = {
         de = "Zielt automatisch auf priorisierte Spezialgegner beim Rechtsklick oder mit einer benutzerdefinierten Taste. Enthält optionalen Triggerbot."
     },
 
-    -- Priority Levels
-    Off = {
-        en = "Off",
-        ru = "Выкл",
-        de = "Aus"
-    },
-    Lowest = {
-        en = "Lowest",
-        ru = "Самый низкий",
-        de = "Am niedrigsten"
-    },
-    Lower = {
-        en = "Lower",
-        ru = "Ниже",
-        de = "Niedriger"
-    },
-    Low = {
-        en = "Low",
-        ru = "Низкий",
-        de = "Niedrig"
-    },
-    Medium = {
-        en = "Medium",
-        ru = "Средний",
-        de = "Mittel"
-    },
-    Elevated = {
-        en = "Elevated",
-        ru = "Повышенный",
-        de = "Erhöht"
-    },
-    High = {
-        en = "High",
-        ru = "Высокий",
-        de = "Hoch"
-    },
-    Extreme = {
-        en = "Extreme",
-        ru = "Экстремальный",
-        de = "Extrem"
-    },
-    Ultra = {
-        en = "Ultra",
-        ru = "Ультра",
-        de = "Ultra"
-    },
-    Critical = {
-        en = "Critical",
-        ru = "Критический",
-        de = "Kritisch"
-    },
+    -- Priority Levels (0 = Off, 1–15 = numeric priority; higher wins)
+    Off   = { en = "Off", ru = "Выкл", de = "Aus" },
+    ["1"]  = { en = "1"  },
+    ["2"]  = { en = "2"  },
+    ["3"]  = { en = "3"  },
+    ["4"]  = { en = "4"  },
+    ["5"]  = { en = "5"  },
+    ["6"]  = { en = "6"  },
+    ["7"]  = { en = "7"  },
+    ["8"]  = { en = "8"  },
+    ["9"]  = { en = "9"  },
+    ["10"] = { en = "10" },
+    ["11"] = { en = "11" },
+    ["12"] = { en = "12" },
+    ["13"] = { en = "13" },
+    ["14"] = { en = "14" },
+    ["15"] = { en = "15" },
     
     -- General Settings
     general_settings = {
@@ -127,7 +93,7 @@ local loc = {
     },
     disable_when_teammates_are_dead_description = {
         en = "If enabled, auto-aim will be disabled when any teammate is dead.",
-        ru = "Если включено, автонаведение будет отключено, когда любой товарищ",
+        ru = "Если включено, автонаведение будет отключено, когда любой товарищ по команде мёртв или связан.",
         de = "Wenn aktiviert, wird das Auto-Zielen deaktiviert, wenn ein Teammitglied tot ist."
     },
 
@@ -310,25 +276,35 @@ local loc = {
         ru = "Автоматически наводиться на Мутантов.",
         de = "Automatisch Mutanten anvisieren."
     },
-    target_ogryns = {
-        en = "Target Ogryns (Reaper)",
-        ru = "Наводиться на Огринов (Жнец)",
-        de = "Ogryns anvisieren (Schnitter)"
+    target_reapers = {
+        en = "Target Reapers",
+        ru = "Наводиться на Жнецов",
+        de = "Schnitter anvisieren"
     },
-    target_ogryns_description = {
-        en = "Automatically aim at Reaper Ogryns.",
-        ru = "Автоматически наводиться на Жнец.",
-        de = "Automatisch Ogryns-Schnitter anvisieren."
+    target_reapers_description = {
+        en = "Automatically aim at Reapers.",
+        ru = "Автоматически наводиться на Жнецов.",
+        de = "Automatisch Schnitter anvisieren."
     },
-    target_ogryns_melee = {
-        en = "Target Ogryns (Melee)",
-        ru = "Наводиться на Огринов",
-        de = "Ogryns anvisieren"
+    target_crushers = {
+        en = "Target Crushers",
+        ru = "Наводиться на Дробителей",
+        de = "Zertrümmerer anvisieren"
     },
-    target_ogryns_melee_description = {
-        en = "Automatically aim at Ogryns. (Bulwark/Crusher)",
-        ru = "Автоматически наводиться на Огринов (Щитоносец/Дробитель).",
-        de = "Automatisch Ogryns anvisieren (Bulwark/Crusher)."
+    target_crushers_description = {
+        en = "Automatically aim at Crushers.",
+        ru = "Автоматически наводиться на Дробителей.",
+        de = "Automatisch Zertrümmerer anvisieren."
+    },
+    target_bulwarks = {
+        en = "Target Bulwarks",
+        ru = "Наводиться на Щитоносцев",
+        de = "Bulwarks anvisieren"
+    },
+    target_bulwarks_description = {
+        en = "Automatically aim at Bulwarks.",
+        ru = "Автоматически наводиться на Щитоносцев.",
+        de = "Automatisch Bulwarks anvisieren."
     },
     target_mauler = {
         en = "Target Scab Maulers",
@@ -346,9 +322,9 @@ local loc = {
         de = "Normale Nahkampfgegner anvisieren"
     },
     target_melee_regular_description = {
-        en = "Automatically aim at regular melee enemies (e.g., Chaos Cultists, Plague Zombies).",
-        ru = "Автоматически наводиться на обычных ближних врагов (например, культистов Хаоса, чумных зомби).",
-        de = "Automatisch normale Nahkampfgegner anvisieren (z.B. Chaos-Kultisten, Seuchen-Zombies)."
+        en = "Automatically aim at regular melee enemies (e.g., Poxwalkers, Groaners, Dreg Bruisers).",
+        ru = "Автоматически наводиться на обычных ближних врагов (например, Поксвокеров, Стонущих, Дрег-Громил).",
+        de = "Automatisch normale Nahkampfgegner anvisieren (z.B. Poxwalker, Groaner, Dreg-Schläger)."
     },
     target_ranged_regular = {
         en = "Target Regular Ranged Enemies",
@@ -356,10 +332,143 @@ local loc = {
         de = "Normale Fernkampfgegner anvisieren"
     },
     target_ranged_regular_description = {
-        en = "Automatically aim at regular ranged enemies (e.g., Plague Monks, Chaos Warriors).",
-        ru = "Автоматически наводиться на обычных дальних врагов (например, чумных монахов, воинов Хаоса).",
-        de = "Automatisch normale Fernkampfgegner anvisieren (z.B. Seuchen-Mönche, Chaos-Krieger)."
-    }
+        en = "Automatically aim at regular ranged enemies (e.g., Dreg Stalkers, Scab Shooters, Scab Stalkers).",
+        ru = "Автоматически наводиться на обычных дальних врагов (например, Дрег-Охотников, Скаб-Стрелков, Скаб-Охотников).",
+        de = "Automatisch normale Fernkampfgegner anvisieren (z.B. Dreg-Jäger, Scab-Schützen, Scab-Jäger)."
+    },
+
+    -- Profile selector
+    priority_profile = {
+        en = "Priority Profile",
+        ru = "Профиль приоритетов",
+        de = "Prioritätsprofil"
+    },
+    priority_profile_description = {
+        en = "Select a priority profile. 'Auto' detects your current class automatically. 'Custom' uses the values in the Priority Targets group.",
+        ru = "Выберите профиль приоритетов. «Авто» автоматически определяет ваш класс. «Пользовательский» использует значения из группы приоритетных целей.",
+        de = "Prioritätsprofil wählen. 'Auto' erkennt die aktuelle Klasse. 'Benutzerdefiniert' nutzt die Prioritätsziele-Werte."
+    },
+
+    -- Profile option labels
+    AutoClass    = { en = "Auto",    ru = "Авто",              de = "Auto"              },
+    CustomClass  = { en = "Custom",  ru = "Пользовательский",  de = "Benutzerdefiniert" },
+    VeteranClass = { en = "Veteran", ru = "Ветеран",           de = "Veteran"           },
+    ZealotClass  = { en = "Zealot",  ru = "Фанатик",           de = "Zelot"             },
+    PsykerClass  = { en = "Psyker",  ru = "Псайкер",           de = "Psyker"            },
+    OgrynClass   = { en = "Ogryn",   ru = "Огрин",             de = "Ogryn"             },
+    ArbitratorClass   = { en = "Arbitrator",   ru = "Арбитратор",             de = "Arbitrator"             },
+    BrokerClass   = { en = "Hive Scum",   ru = "Скотина улья",             de = "Hive Scum"             },
+
+    -- Class profile group headings
+    veteran_profile_targets = { en = "Veteran — Priority Targets",    ru = "Ветеран — Приоритетные цели",      de = "Veteran — Prioritätsziele"    },
+    zealot_profile_targets  = { en = "Zealot — Priority Targets",     ru = "Фанатик — Приоритетные цели",      de = "Zelot — Prioritätsziele"      },
+    psyker_profile_targets  = { en = "Psyker — Priority Targets",     ru = "Псайкер — Приоритетные цели",      de = "Psyker — Prioritätsziele"     },
+    ogryn_profile_targets   = { en = "Ogryn — Priority Targets",      ru = "Огрин — Приоритетные цели",        de = "Ogryn — Prioritätsziele"      },
+    adamant_profile_targets = { en = "Arbitrator — Priority Targets", ru = "Арбитратор — Приоритетные цели",   de = "Arbitrator — Prioritätsziele" },
+    broker_profile_targets  = { en = "Hive Scum — Priority Targets",  ru = "Скотина улья — Приоритетные цели", de = "Hive Scum — Prioritätsziele"  },
+
+    -- Per-class target labels
+    veteran_target_bosses         = { en = "Target Bosses"                }, veteran_target_bosses_description         = { en = "Automatically aim at Champions/Beast of Nurgle/Chaos Spawn/Plague Ogryn/Captains." },
+    veteran_target_berzerkers     = { en = "Target Ragers"                }, veteran_target_berzerkers_description     = { en = "Automatically aim at Ragers." },
+    veteran_target_hounds         = { en = "Target Pox Hounds"            }, veteran_target_hounds_description         = { en = "Automatically aim at Pox Hounds." },
+    veteran_target_netgunners     = { en = "Target Trappers"              }, veteran_target_netgunners_description     = { en = "Automatically aim at Trappers." },
+    veteran_target_flamers        = { en = "Target Flamers"               }, veteran_target_flamers_description        = { en = "Automatically aim at Flamers." },
+    veteran_target_snipers        = { en = "Target Snipers"               }, veteran_target_snipers_description        = { en = "Automatically aim at Snipers." },
+    veteran_target_bombers        = { en = "Target Bombers"               }, veteran_target_bombers_description        = { en = "Automatically aim at Bombers and Grenadiers." },
+    veteran_target_poxwalkers     = { en = "Target Poxbursters"           }, veteran_target_poxwalkers_description     = { en = "Automatically aim at Poxbursters." },
+    veteran_target_gunners        = { en = "Target Gunners"               }, veteran_target_gunners_description        = { en = "Automatically aim at Elite Gunner enemies." },
+    veteran_target_mutants        = { en = "Target Mutants"               }, veteran_target_mutants_description        = { en = "Automatically aim at Mutants." },
+    veteran_target_crushers       = { en = "Target Crushers"              }, veteran_target_crushers_description       = { en = "Automatically aim at Crushers." },
+    veteran_target_bulwarks       = { en = "Target Bulwarks"              }, veteran_target_bulwarks_description       = { en = "Automatically aim at Bulwarks." },
+    veteran_target_reapers        = { en = "Target Reapers"               }, veteran_target_reapers_description        = { en = "Automatically aim at Reapers." },
+    veteran_target_mauler         = { en = "Target Scab Maulers"          }, veteran_target_mauler_description         = { en = "Automatically aim at Scab Maulers." },
+    veteran_target_melee_regular  = { en = "Target Regular Melee Enemies" }, veteran_target_melee_regular_description  = { en = "Automatically aim at regular melee enemies." },
+    veteran_target_ranged_regular = { en = "Target Regular Ranged Enemies"}, veteran_target_ranged_regular_description = { en = "Automatically aim at regular ranged enemies." },
+
+    zealot_target_bosses          = { en = "Target Bosses"                }, zealot_target_bosses_description          = { en = "Automatically aim at Champions/Beast of Nurgle/Chaos Spawn/Plague Ogryn/Captains." },
+    zealot_target_berzerkers      = { en = "Target Ragers"                }, zealot_target_berzerkers_description      = { en = "Automatically aim at Ragers." },
+    zealot_target_hounds          = { en = "Target Pox Hounds"            }, zealot_target_hounds_description          = { en = "Automatically aim at Pox Hounds." },
+    zealot_target_netgunners      = { en = "Target Trappers"              }, zealot_target_netgunners_description      = { en = "Automatically aim at Trappers." },
+    zealot_target_flamers         = { en = "Target Flamers"               }, zealot_target_flamers_description         = { en = "Automatically aim at Flamers." },
+    zealot_target_snipers         = { en = "Target Snipers"               }, zealot_target_snipers_description         = { en = "Automatically aim at Snipers." },
+    zealot_target_bombers         = { en = "Target Bombers"               }, zealot_target_bombers_description         = { en = "Automatically aim at Bombers and Grenadiers." },
+    zealot_target_poxwalkers      = { en = "Target Poxbursters"           }, zealot_target_poxwalkers_description      = { en = "Automatically aim at Poxbursters." },
+    zealot_target_gunners         = { en = "Target Gunners"               }, zealot_target_gunners_description         = { en = "Automatically aim at Elite Gunner enemies." },
+    zealot_target_mutants         = { en = "Target Mutants"               }, zealot_target_mutants_description         = { en = "Automatically aim at Mutants." },
+    zealot_target_crushers        = { en = "Target Crushers"              }, zealot_target_crushers_description        = { en = "Automatically aim at Crushers." },
+    zealot_target_bulwarks        = { en = "Target Bulwarks"              }, zealot_target_bulwarks_description        = { en = "Automatically aim at Bulwarks." },
+    zealot_target_reapers         = { en = "Target Reapers"               }, zealot_target_reapers_description         = { en = "Automatically aim at Reapers." },
+    zealot_target_mauler          = { en = "Target Scab Maulers"          }, zealot_target_mauler_description          = { en = "Automatically aim at Scab Maulers." },
+    zealot_target_melee_regular   = { en = "Target Regular Melee Enemies" }, zealot_target_melee_regular_description   = { en = "Automatically aim at regular melee enemies." },
+    zealot_target_ranged_regular  = { en = "Target Regular Ranged Enemies"}, zealot_target_ranged_regular_description  = { en = "Automatically aim at regular ranged enemies." },
+
+    psyker_target_bosses          = { en = "Target Bosses"                }, psyker_target_bosses_description          = { en = "Automatically aim at Champions/Beast of Nurgle/Chaos Spawn/Plague Ogryn/Captains." },
+    psyker_target_berzerkers      = { en = "Target Ragers"                }, psyker_target_berzerkers_description      = { en = "Automatically aim at Ragers." },
+    psyker_target_hounds          = { en = "Target Pox Hounds"            }, psyker_target_hounds_description          = { en = "Automatically aim at Pox Hounds." },
+    psyker_target_netgunners      = { en = "Target Trappers"              }, psyker_target_netgunners_description      = { en = "Automatically aim at Trappers." },
+    psyker_target_flamers         = { en = "Target Flamers"               }, psyker_target_flamers_description         = { en = "Automatically aim at Flamers." },
+    psyker_target_snipers         = { en = "Target Snipers"               }, psyker_target_snipers_description         = { en = "Automatically aim at Snipers." },
+    psyker_target_bombers         = { en = "Target Bombers"               }, psyker_target_bombers_description         = { en = "Automatically aim at Bombers and Grenadiers." },
+    psyker_target_poxwalkers      = { en = "Target Poxbursters"           }, psyker_target_poxwalkers_description      = { en = "Automatically aim at Poxbursters." },
+    psyker_target_gunners         = { en = "Target Gunners"               }, psyker_target_gunners_description         = { en = "Automatically aim at Elite Gunner enemies." },
+    psyker_target_mutants         = { en = "Target Mutants"               }, psyker_target_mutants_description         = { en = "Automatically aim at Mutants." },
+    psyker_target_crushers        = { en = "Target Crushers"              }, psyker_target_crushers_description        = { en = "Automatically aim at Crushers." },
+    psyker_target_bulwarks        = { en = "Target Bulwarks"              }, psyker_target_bulwarks_description        = { en = "Automatically aim at Bulwarks." },
+    psyker_target_reapers         = { en = "Target Reapers"               }, psyker_target_reapers_description         = { en = "Automatically aim at Reapers." },
+    psyker_target_mauler          = { en = "Target Scab Maulers"          }, psyker_target_mauler_description          = { en = "Automatically aim at Scab Maulers." },
+    psyker_target_melee_regular   = { en = "Target Regular Melee Enemies" }, psyker_target_melee_regular_description   = { en = "Automatically aim at regular melee enemies." },
+    psyker_target_ranged_regular  = { en = "Target Regular Ranged Enemies"}, psyker_target_ranged_regular_description  = { en = "Automatically aim at regular ranged enemies." },
+
+    ogryn_target_bosses           = { en = "Target Bosses"                }, ogryn_target_bosses_description           = { en = "Automatically aim at Champions/Beast of Nurgle/Chaos Spawn/Plague Ogryn/Captains." },
+    ogryn_target_berzerkers       = { en = "Target Ragers"                }, ogryn_target_berzerkers_description       = { en = "Automatically aim at Ragers." },
+    ogryn_target_hounds           = { en = "Target Pox Hounds"            }, ogryn_target_hounds_description           = { en = "Automatically aim at Pox Hounds." },
+    ogryn_target_netgunners       = { en = "Target Trappers"              }, ogryn_target_netgunners_description       = { en = "Automatically aim at Trappers." },
+    ogryn_target_flamers          = { en = "Target Flamers"               }, ogryn_target_flamers_description          = { en = "Automatically aim at Flamers." },
+    ogryn_target_snipers          = { en = "Target Snipers"               }, ogryn_target_snipers_description          = { en = "Automatically aim at Snipers." },
+    ogryn_target_bombers          = { en = "Target Bombers"               }, ogryn_target_bombers_description          = { en = "Automatically aim at Bombers and Grenadiers." },
+    ogryn_target_poxwalkers       = { en = "Target Poxbursters"           }, ogryn_target_poxwalkers_description       = { en = "Automatically aim at Poxbursters." },
+    ogryn_target_gunners          = { en = "Target Gunners"               }, ogryn_target_gunners_description          = { en = "Automatically aim at Elite Gunner enemies." },
+    ogryn_target_mutants          = { en = "Target Mutants"               }, ogryn_target_mutants_description          = { en = "Automatically aim at Mutants." },
+    ogryn_target_crushers         = { en = "Target Crushers"              }, ogryn_target_crushers_description         = { en = "Automatically aim at Crushers." },
+    ogryn_target_bulwarks         = { en = "Target Bulwarks"              }, ogryn_target_bulwarks_description         = { en = "Automatically aim at Bulwarks." },
+    ogryn_target_reapers          = { en = "Target Reapers"               }, ogryn_target_reapers_description          = { en = "Automatically aim at Reapers." },
+    ogryn_target_mauler           = { en = "Target Scab Maulers"          }, ogryn_target_mauler_description           = { en = "Automatically aim at Scab Maulers." },
+    ogryn_target_melee_regular    = { en = "Target Regular Melee Enemies" }, ogryn_target_melee_regular_description    = { en = "Automatically aim at regular melee enemies." },
+    ogryn_target_ranged_regular   = { en = "Target Regular Ranged Enemies"}, ogryn_target_ranged_regular_description   = { en = "Automatically aim at regular ranged enemies." },
+
+    adamant_target_bosses         = { en = "Target Bosses"                }, adamant_target_bosses_description         = { en = "Automatically aim at Champions/Beast of Nurgle/Chaos Spawn/Plague Ogryn/Captains." },
+    adamant_target_berzerkers     = { en = "Target Ragers"                }, adamant_target_berzerkers_description     = { en = "Automatically aim at Ragers." },
+    adamant_target_hounds         = { en = "Target Pox Hounds"            }, adamant_target_hounds_description         = { en = "Automatically aim at Pox Hounds." },
+    adamant_target_netgunners     = { en = "Target Trappers"              }, adamant_target_netgunners_description     = { en = "Automatically aim at Trappers." },
+    adamant_target_flamers        = { en = "Target Flamers"               }, adamant_target_flamers_description        = { en = "Automatically aim at Flamers." },
+    adamant_target_snipers        = { en = "Target Snipers"               }, adamant_target_snipers_description        = { en = "Automatically aim at Snipers." },
+    adamant_target_bombers        = { en = "Target Bombers"               }, adamant_target_bombers_description        = { en = "Automatically aim at Bombers and Grenadiers." },
+    adamant_target_poxwalkers     = { en = "Target Poxbursters"           }, adamant_target_poxwalkers_description     = { en = "Automatically aim at Poxbursters." },
+    adamant_target_gunners        = { en = "Target Gunners"               }, adamant_target_gunners_description        = { en = "Automatically aim at Elite Gunner enemies." },
+    adamant_target_mutants        = { en = "Target Mutants"               }, adamant_target_mutants_description        = { en = "Automatically aim at Mutants." },
+    adamant_target_crushers       = { en = "Target Crushers"              }, adamant_target_crushers_description       = { en = "Automatically aim at Crushers." },
+    adamant_target_bulwarks       = { en = "Target Bulwarks"              }, adamant_target_bulwarks_description       = { en = "Automatically aim at Bulwarks." },
+    adamant_target_reapers        = { en = "Target Reapers"               }, adamant_target_reapers_description        = { en = "Automatically aim at Reapers." },
+    adamant_target_mauler         = { en = "Target Scab Maulers"          }, adamant_target_mauler_description         = { en = "Automatically aim at Scab Maulers." },
+    adamant_target_melee_regular  = { en = "Target Regular Melee Enemies" }, adamant_target_melee_regular_description  = { en = "Automatically aim at regular melee enemies." },
+    adamant_target_ranged_regular = { en = "Target Regular Ranged Enemies"}, adamant_target_ranged_regular_description = { en = "Automatically aim at regular ranged enemies." },
+
+    broker_target_bosses          = { en = "Target Bosses"                }, broker_target_bosses_description          = { en = "Automatically aim at Champions/Beast of Nurgle/Chaos Spawn/Plague Ogryn/Captains." },
+    broker_target_berzerkers      = { en = "Target Ragers"                }, broker_target_berzerkers_description      = { en = "Automatically aim at Ragers." },
+    broker_target_hounds          = { en = "Target Pox Hounds"            }, broker_target_hounds_description          = { en = "Automatically aim at Pox Hounds." },
+    broker_target_netgunners      = { en = "Target Trappers"              }, broker_target_netgunners_description      = { en = "Automatically aim at Trappers." },
+    broker_target_flamers         = { en = "Target Flamers"               }, broker_target_flamers_description         = { en = "Automatically aim at Flamers." },
+    broker_target_snipers         = { en = "Target Snipers"               }, broker_target_snipers_description         = { en = "Automatically aim at Snipers." },
+    broker_target_bombers         = { en = "Target Bombers"               }, broker_target_bombers_description         = { en = "Automatically aim at Bombers and Grenadiers." },
+    broker_target_poxwalkers      = { en = "Target Poxbursters"           }, broker_target_poxwalkers_description      = { en = "Automatically aim at Poxbursters." },
+    broker_target_gunners         = { en = "Target Gunners"               }, broker_target_gunners_description         = { en = "Automatically aim at Elite Gunner enemies." },
+    broker_target_mutants         = { en = "Target Mutants"               }, broker_target_mutants_description         = { en = "Automatically aim at Mutants." },
+    broker_target_crushers        = { en = "Target Crushers"              }, broker_target_crushers_description        = { en = "Automatically aim at Crushers." },
+    broker_target_bulwarks        = { en = "Target Bulwarks"              }, broker_target_bulwarks_description        = { en = "Automatically aim at Bulwarks." },
+    broker_target_reapers         = { en = "Target Reapers"               }, broker_target_reapers_description         = { en = "Automatically aim at Reapers." },
+    broker_target_mauler          = { en = "Target Scab Maulers"          }, broker_target_mauler_description          = { en = "Automatically aim at Scab Maulers." },
+    broker_target_melee_regular   = { en = "Target Regular Melee Enemies" }, broker_target_melee_regular_description   = { en = "Automatically aim at regular melee enemies." },
+    broker_target_ranged_regular  = { en = "Target Regular Ranged Enemies"}, broker_target_ranged_regular_description  = { en = "Automatically aim at regular ranged enemies." },
 }
 
 return loc
