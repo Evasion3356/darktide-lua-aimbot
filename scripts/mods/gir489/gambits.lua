@@ -426,7 +426,6 @@ end
 -- Surgical perk (chance_based_on_aim_time) constants
 local SURGICAL_MAX_STACKS = 10
 local SURGICAL_CHANCE_PER_STACK = 0.10
-local SURGICAL_DURATION_PER_STACK = 1.0
 
 -- Inlined P2C table from PseudoRandomDistribution — maps floor(chance*100) to
 -- the per-attempt constant C used by the PRD algorithm.  Avoids requiring the
@@ -482,17 +481,6 @@ local function prd_would_crit(chance, state, seed)
     return value < n * c
 end
 
--- Returns true if the player has any active crit_chance_based_on_aim_time buff.
-local function _has_surgical_perk(buff_ext)
-    local buffs = buff_ext:buffs()
-    for i = 1, #buffs do
-        local name = buffs[i]:template().name
-        if name and name:find("crit_chance_based_on_aim_time", 1, true) then
-            return true
-        end
-    end
-    return false
-end
 
 -- Estimates normal damage per hit against target_unit using
 -- the current weapon's damage profile and the target's armor type.
@@ -551,7 +539,7 @@ end
 -- Returns:
 --   "fire"          -- current chance already crits, or no Surgical / not
 --                      aiming / waiting won't help; fire to advance the seed
---   "wait", seconds -- hold fire this many more seconds for a guaranteed crit
+--   "wait"          -- hold fire until the next Surgical stack produces a crit
 local function predict_crit_wait(player_unit)
     local player = Managers.player:local_player(1)
     if not player or not player.player_unit then
@@ -589,45 +577,54 @@ local function predict_crit_wait(player_unit)
         return "fire"
     end
 
-    -- No Surgical perk → waiting won't change anything
-    if not _has_surgical_perk(buff_ext) then
-        return "fire"
-    end
-
     -- Must be aiming to gain stacks
     local alternate_fire = unit_data_ext:read_component("alternate_fire")
     if not alternate_fire or not alternate_fire.is_active then
         return "fire"
     end
 
-    -- Current Surgical stack count from aim time
-    local action_shoot = unit_data_ext:read_component("action_shoot")
-    local t = Managers.time:time("gameplay")
-    local check_time = math.max(alternate_fire.start_t, action_shoot.fire_last_t)
-    local time_lapsed = t - check_time
-    local current_stacks = math.clamp(math.floor(time_lapsed / SURGICAL_DURATION_PER_STACK), 0, SURGICAL_MAX_STACKS)
+    -- Read current Surgical stack count directly from the buff.
+    -- No buff found means the perk isn't equipped — fire immediately.
+    local current_stacks = nil
+    local buffs = buff_ext:buffs()
+    for i = 1, #buffs do
+        local buff = buffs[i]
+        local name = buff:template().name
+        if name and name:find("crit_chance_based_on_aim_time", 1, true) then
+            current_stacks = buff:visual_stack_count()
+            break
+        end
+    end
+
+    if current_stacks == nil then
+        return "fire"
+    end
 
     -- Simulate each additional stack to see if any produces a crit
     for extra = 1, SURGICAL_MAX_STACKS - current_stacks do
         local test_chance = math.clamp(current_chance + extra * SURGICAL_CHANCE_PER_STACK, 0, 1)
         if prd_would_crit(math.round_with_precision(test_chance, 2), prd_state, seed) then
-            local target_time = (current_stacks + extra) * SURGICAL_DURATION_PER_STACK
-            local wait_seconds = math.max(target_time - time_lapsed, 0)
-
-            -- If there is an actual delay, check whether waiting for the crit
-            -- is faster than just firing regular shots.
-            if wait_seconds > 0 and last_aim_unit then
+            -- Need extra more stacks; check if waiting is damage-efficient
+            if last_aim_unit then
                 local health_ext = ScriptUnit_has_extension(last_aim_unit, "health_system")
                 if health_ext and health_ext:is_alive() then
                     local hp = health_ext:current_health()
                     local n_dmg = _estimate_shot_damage(player_unit, last_aim_unit)
-                    if n_dmg and n_dmg > 0 and math.ceil(hp / n_dmg) <= 2 then
-                        return "fire"
+                    if n_dmg and n_dmg > 0 then
+                        local breed = Breed.unit_breed_or_nil(last_aim_unit)
+                        local armor_type = breed and breed.armor_type
+                        -- For carapace (super_armor, base ADM=0→crit floors at 0.25) and flak
+                        -- (armored, base ADM=0.5, crit adds finesse ~1.5x), crits are valuable
+                        -- enough that we only skip the wait if a single normal shot already kills.
+                        local bypass_shots = (armor_type == "super_armor" or armor_type == "armored") and 1 or 2
+                        if math.ceil(hp / n_dmg) <= bypass_shots then
+                            return "fire"
+                        end
                     end
                 end
             end
 
-            return "wait", wait_seconds
+            return "wait"
         end
     end
 
@@ -1075,34 +1072,43 @@ local function is_reticle_on_enemy()
                 return false
             elseif result == "hit" then
                 local hit_unit = Actor_unit(actor)
-                if ScriptUnit_has_extension(hit_unit, "health_system") then
-                    local health_ext = ScriptUnit_extension(hit_unit, "health_system")
-                    if health_ext:is_alive() then
-                        local breed = Breed.unit_breed_or_nil(hit_unit)
-                        if breed and not Breed.is_player(breed) and not breed.name:find("hazard") then
-                            if weakspot_only then
-                                local zone_name = HitZone.get_name(hit_unit, actor)
-                                if zone_name ~= HitZone.hit_zone_names.head and zone_name ~= HitZone.hit_zone_names.weakspot then
-                                    goto continue_hit_loop
-                                end
-                            end
+                if not ScriptUnit_has_extension(hit_unit, "health_system") then
+                    -- Solid non-health unit (prop, env piece) blocks the ray.
+                    return false
+                end
+                local health_ext = ScriptUnit_extension(hit_unit, "health_system")
+                if not health_ext:is_alive() then
+                    -- Dead body (not yet ragdolled) blocks the ray.
+                    return false
+                end
+                local breed = Breed.unit_breed_or_nil(hit_unit)
+                if not breed or Breed.is_player(breed) or breed.name:find("hazard") then
+                    -- Friendly or non-targetable unit blocks the ray.
+                    return false
+                end
 
-                            local breed_name = breed.name
-                            if respect_priority and get_breed_priority(breed_name, hit_unit) == 0 then
-                                goto continue_hit_loop
-                            else
-                                if DAEMONHOST_BREEDS[breed_name] and get_daemonhost_priority(hit_unit, 1) == 0 then
-                                    goto continue_hit_loop
-                                end
-                                if POXBURSTER_BREEDS[breed_name] and not is_poxburster_safe_to_target(hit_unit) then
-                                    goto continue_hit_loop
-                                end
-                            end
-
-                            return true
-                        end
+                if weakspot_only then
+                    local zone_name = HitZone.get_name(hit_unit, actor)
+                    if zone_name ~= HitZone.hit_zone_names.head and zone_name ~= HitZone.hit_zone_names.weakspot then
+                        -- Wrong zone on a valid enemy: the head actor may be a
+                        -- separate hit slightly further along the same unit.
+                        goto continue_hit_loop
                     end
                 end
+
+                local breed_name = breed.name
+                if respect_priority and get_breed_priority(breed_name, hit_unit) == 0 then
+                    -- Low-priority enemy physically blocks the ray.
+                    return false
+                end
+                if DAEMONHOST_BREEDS[breed_name] and get_daemonhost_priority(hit_unit, 1) == 0 then
+                    return false
+                end
+                if POXBURSTER_BREEDS[breed_name] and not is_poxburster_safe_to_target(hit_unit) then
+                    return false
+                end
+
+                return true
             end
         end
 
@@ -1138,7 +1144,7 @@ local _get = function(func, self, action_name)
         return func(self, action_name)
     end
 
-    local can_fire = (cached_settings.triggerbot_use_raycast and is_reticle_on_enemy()) or has_target
+    local can_fire = cached_settings.triggerbot_use_raycast and is_reticle_on_enemy() or not cached_settings.triggerbot_use_raycast and has_target
     if not can_fire then
         return func(self, action_name)
     end
