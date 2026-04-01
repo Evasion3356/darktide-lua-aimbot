@@ -183,6 +183,7 @@ local function refresh_settings()
     cached_settings.disable_when_teammates_are_dead = mod:get("disable_when_teammates_are_dead")
     cached_settings.priority_profile = mod:get("priority_profile")
     cached_settings.enable_spread_compensation = mod:get("enable_spread_compensation")
+    cached_settings.wait_for_crits = mod:get("wait_for_crits")
 
     -- Build a [class][breed_name] -> priority lookup table so get_breed_priority
     local pt = cached_settings.priority_target or {}
@@ -1150,12 +1151,14 @@ local _get = function(func, self, action_name)
     end
 
     -- Surgical crit-wait: suppress fire if waiting for more stacks will crit
-    local player_unit = Managers.player:local_player(1)
-    player_unit = player_unit and player_unit.player_unit
-    if player_unit then
-        local crit_action = predict_crit_wait(player_unit)
-        if crit_action == "wait" then
-            return false
+    if cached_settings.wait_for_crits then
+        local player_unit = Managers.player:local_player(1)
+        player_unit = player_unit and player_unit.player_unit
+        if player_unit then
+            local crit_action = predict_crit_wait(player_unit)
+            if crit_action == "wait" then
+                return false
+            end
         end
     end
 

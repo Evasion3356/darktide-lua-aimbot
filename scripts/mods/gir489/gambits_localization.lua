@@ -173,6 +173,16 @@ local loc = {
         ru = "Если включено, прицел и луч триггербота будут предсказывать и компенсировать разброс оружия.",
         de = "Wenn aktiviert, werden Zielen und Triggerbot-Raycast die Waffenstreuung vorhersagen und kompensieren."
     },
+    wait_for_crits = {
+        en = "Wait for Surgical Crits",
+        ru = "Ждать критов (Хирург)",
+        de = "Auf Chirurgie-Krit warten"
+    },
+    wait_for_crits_description = {
+        en = "If enabled, triggerbot will hold fire when aiming longer will guarantee a critical hit via the Surgical perk.",
+        ru = "Если включено, триггербот удерживает огонь, если дополнительное время прицеливания гарантирует критический удар через перк «Хирург».",
+        de = "Wenn aktiviert, hält der Triggerbot das Feuer zurück, wenn längeres Zielen durch den Chirurgie-Perk einen kritischen Treffer garantiert."
+    },
 
     -- Priority Targets
     priority_targets = {

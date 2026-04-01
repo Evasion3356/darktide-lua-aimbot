@@ -148,6 +148,11 @@ return {
                         default_value = false
                     },
                     {
+                        setting_id = "wait_for_crits",
+                        type = "checkbox",
+                        default_value = true
+                    },
+                    {
                         setting_id = "triggerbot_keybind",
                         type = "keybind",
                         default_value = {"extra_2"},
