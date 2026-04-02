@@ -184,8 +184,11 @@ local function refresh_settings()
     cached_settings.priority_profile = mod:get("priority_profile")
     cached_settings.enable_spread_compensation = mod:get("enable_spread_compensation")
     cached_settings.wait_for_crits = mod:get("wait_for_crits")
+    cached_settings.enable_auto_guard = mod:get("enable_auto_guard")
+    cached_settings.auto_guard_range = mod:get("auto_guard_range")
+    cached_settings.auto_guard_heavy_only = mod:get("auto_guard_heavy_only")
 
-    -- Build a [class][breed_name] -> priority lookup table so get_breed_priority
+    -- Build a [class][breed_name] -> priority lookup table for get_breed_priority.
     local pt = cached_settings.priority_target or {}
     for class, prefix in pairs(PROFILE_PREFIXES) do
         local class_tbl = pt[class] or {}
@@ -770,32 +773,24 @@ local function look_at_aim_target(enemy_unit, zone, player, shooting_pos, player
 end
 
 local function get_fire_interval()
-    -- Get current time from the game using main clock (steadier than gameplay)
     local current_time = Managers.time:time("main") or 0
 
-    -- Try to get the player's peer connection
     local player = Managers.player:local_player(1)
     if not player then
-        return 0.1, current_time -- Default 100ms interval if we can't get latency
+        return 0.1, current_time
     end
 
-    -- Get the peer ID for the player
     local peer_id = player:peer_id()
     if not peer_id then
         return 0.1, current_time
     end
 
-    -- Get RTT (round trip time) from Network API - this returns time in seconds
     local rtt = Network.ping(peer_id)
     if not rtt or rtt == 0 then
         return 0.1, current_time
     end
 
-    -- Double the latency as requested (full roundtrip = client -> server -> client)
-    -- The Network.ping already returns RTT, so we use it as-is and double it
-    local fire_interval = rtt * 2
-
-    return fire_interval, current_time
+    return rtt * 2, current_time
 end
 
 local function are_teammates_dead()
@@ -808,12 +803,10 @@ local function are_teammates_dead()
     local game_session_manager = Managers.state.game_session
     for _, player in pairs(human_players) do
         if player ~= local_player then
-            -- Check if dead
             local peer_id = player:peer_id()
             if game_session_manager:connected_to_client(peer_id) and not player:unit_is_alive() then
                 return true
             end
-            -- Check if hogtied
             if player.player_unit and ScriptUnit_has_extension(player.player_unit, "unit_data_system") then
                 local unit_data_extension = ScriptUnit_extension(player.player_unit, "unit_data_system")
                 local character_state_component = unit_data_extension:read_component("character_state")
@@ -834,7 +827,6 @@ local function auto_aim_priority_targets(player_unit)
         return
     end
 
-    -- Check if disable is enabled when teammates are dead
     if cached_settings.disable_when_teammates_are_dead and are_teammates_dead() then
         has_target = false
         return
@@ -1003,6 +995,16 @@ local function is_main_weapon_equipped()
     return wielded_slot == "slot_secondary"
 end
 
+local function is_melee_weapon_equipped()
+    local player = Managers.player:local_player_safe(1)
+    if not player or not player.player_unit then return false end
+    local unit_data_ext = ScriptUnit_extension(player.player_unit, "unit_data_system")
+    if not unit_data_ext then return false end
+    local inventory_component = unit_data_ext:read_component("inventory")
+    if not inventory_component then return false end
+    return inventory_component.wielded_slot == "slot_primary"
+end
+
 local function is_reticle_on_enemy()
     local player = Managers.player:local_player(1)
     if not player or not player.player_unit then
@@ -1044,7 +1046,6 @@ local function is_reticle_on_enemy()
                 end
             end
 
-            -- Get max distance from weapon template
             if weapon_template.hit_scan_template and weapon_template.hit_scan_template.range then
                 max_distance = weapon_template.hit_scan_template.range
             end
@@ -1062,6 +1063,9 @@ local function is_reticle_on_enemy()
 
     local weakspot_only = cached_settings.triggerbot_weakspot_only
     local respect_priority = cached_settings.triggerbot_respect_priority
+    -- Tracks the first enemy unit the ray intersects (used by weakspot_only to prevent
+    -- "looking through" one enemy's body to find a weakspot on the unit behind it).
+    local weakspot_first_unit = nil
 
     for i = 1, #hits do
         local hit = hits[i]
@@ -1093,7 +1097,17 @@ local function is_reticle_on_enemy()
                     if zone_name ~= HitZone.hit_zone_names.head and zone_name ~= HitZone.hit_zone_names.weakspot then
                         -- Wrong zone on a valid enemy: the head actor may be a
                         -- separate hit slightly further along the same unit.
+                        -- If a different enemy unit is in the way, it blocks the shot.
+                        if weakspot_first_unit and hit_unit ~= weakspot_first_unit then
+                            return false
+                        end
+                        weakspot_first_unit = hit_unit
                         goto continue_hit_loop
+                    end
+                    -- Correct zone, but reject if it belongs to a different enemy than
+                    -- the first non-weakspot unit encountered on this ray.
+                    if weakspot_first_unit and hit_unit ~= weakspot_first_unit then
+                        return false
                     end
                 end
 
@@ -1127,17 +1141,267 @@ mod.toggle_triggerbot = function(is_pressed)
     triggerbot_pressed = is_pressed
 end
 
+-- Auto guard state: true when a nearby enemy is executing a power attack
+local auto_guard_blocking = false
+-- True when an enemy is within the player's weapon reach
+local melee_enemy_in_range = false
+-- Melee auto-attack pulse: simulate press→release so the game sees a rising edge each cycle
+local melee_press_last_t = 0
+local MELEE_PRESS_CYCLE    = 0.35  -- seconds between press pulses
+local MELEE_PRESS_DURATION = 0.05  -- seconds to hold the press true
+
+local DEFAULT_MELEE_REACH = 2.5  -- matches bot DEFAULT_MAXIMAL_MELEE_RANGE
+local DEFAULT_ENEMY_RADIUS = 0.5 -- matches bot DEFAULT_ENEMY_HITBOX_RADIUS_APPROXIMATION
+-- Enemies must be within this dot-product of the camera forward to count as
+-- "in range" for auto-attack.  0.0 = front hemisphere (180° total cone).
+local MELEE_FOV_DOT = 0.0
+
+local function get_melee_reach(player_unit)
+    local unit_data_ext = ScriptUnit_extension(player_unit, "unit_data_system")
+    if not unit_data_ext then return DEFAULT_MELEE_REACH end
+    local weapon_action_component = unit_data_ext:read_component("weapon_action")
+    if not weapon_action_component then return DEFAULT_MELEE_REACH end
+    local weapon_template = WeaponTemplate.current_weapon_template(weapon_action_component)
+    if not weapon_template then return DEFAULT_MELEE_REACH end
+    -- weapon_box[3] is the OBB z-half-extent used for sweep collision geometry, not
+    -- the reach from player to target. The bot reads attack_meta_data.max_range instead
+    -- (bt_bot_melee_action.lua:_calculate_melee_range). Player melee weapons never define
+    -- attack_meta_data, so they always fall through to DEFAULT_MELEE_REACH (2.5 m),
+    -- matching DEFAULT_MAXIMAL_MELEE_RANGE in bt_bot_melee_action.lua.
+    local attack_meta_data = weapon_template.attack_meta_data
+    if attack_meta_data then
+        local light = attack_meta_data.light_attack
+        if light and light.max_range then
+            return light.max_range
+        end
+    end
+    return DEFAULT_MELEE_REACH
+end
+
+local function check_enemy_in_melee_range(player_unit)
+    local player_pos = POSITION_LOOKUP[player_unit]
+    if not player_pos then return false end
+
+    local reach = get_melee_reach(player_unit)
+
+    -- Get camera forward once for the FOV check below.
+    local unit_data_ext = ScriptUnit_extension(player_unit, "unit_data_system")
+    local forward = unit_data_ext and
+        Quaternion_forward(unit_data_ext:read_component("first_person").rotation)
+
+    local extension_manager = Managers.state and Managers.state.extension
+    if not extension_manager then return false end
+
+    local entities = extension_manager:get_entities("MinionHuskLocomotionExtension")
+    if not next(entities) then
+        entities = extension_manager:get_entities("MinionLocomotionExtension")
+        if not next(entities) then return false end
+    end
+
+    for unit, _ in pairs(entities) do
+        local health_ext = ScriptUnit_has_extension(unit, "health_system")
+        if not (health_ext and health_ext:is_alive()) then goto continue_range end
+
+        local enemy_pos = POSITION_LOOKUP[unit]
+        if not enemy_pos then goto continue_range end
+
+        local unit_data_ext = ScriptUnit_has_extension(unit, "unit_data_system")
+        local enemy_radius = DEFAULT_ENEMY_RADIUS
+        if unit_data_ext then
+            local breed = unit_data_ext:breed()
+            if breed and breed.bot_hitbox_radius_approximation then
+                enemy_radius = breed.bot_hitbox_radius_approximation
+            end
+        end
+
+        local diff = enemy_pos - player_pos
+        local dist_sq = Vector3_dot(diff, diff)
+        if dist_sq <= (reach + enemy_radius) ^ 2 then
+            -- Reject enemies outside the front hemisphere so we don't swing at
+            -- things directly behind the player.
+            if forward and Vector3_dot(forward, Vector3_normalize(diff)) >= MELEE_FOV_DOT then
+                return true
+            end
+        end
+
+        ::continue_range::
+    end
+
+    return false
+end
+
+-- Per-unit animation attack window tracking.
+local unit_attack_end_times   = {}  -- unit -> expiry time (main clock seconds)
+local unit_attack_is_heavy    = {}  -- unit -> true when event was a moving/running swing
+local unit_attack_start_times = {}  -- unit -> time the anim event first fired
+local ATTACK_ANIM_WINDOW = 3.0   -- seconds; exceeds the longest enemy attack damage timing
+-- Guard window: Layer A fires when animation_get_time[1] (elapsed in the charge state)
+-- is in [GUARD_START_T, GUARD_END_T].  The attack event fires ~218 ms into the charge
+-- state; the hit frame arrives ~1.2-1.3 s after the event = ~1.42-1.52 s from state entry.
+local GUARD_START_T = 1.4  -- seconds from state entry → guard raises
+local GUARD_END_T   = 1.5  -- seconds from state entry → guard drops
+
+-- unit -> breed name; breed name -> {event_index -> event_name}
+local _unit_breed_name        = {}
+local _breed_attack_idx_cache = {}
+
+-- Per-breed attack-state signatures: maps state node index → true.
+-- Pre-seeded for known breeds; new indices learned at runtime via _on_attack_anim_event.
+local _breed_attack_state_sigs = {}
+
+-- Charge-state indices for chaos_newly_infected; states 103/108 excluded (fire during
+-- locomotion transitions → false positives).  attack_run_01 learned at runtime.
+_breed_attack_state_sigs["chaos_newly_infected"] = { [93]=true, [94]=true, [98]=true }
+
+-- Pre-allocated scratch tables for GC-efficient per-frame state / time polling.
+local _anim_state_scratch = {}
+local _anim_time_scratch  = {}
+
+local function check_power_attack_incoming(player_unit)
+    local player_pos = POSITION_LOOKUP[player_unit]
+    if not player_pos then return false end
+
+    local range = cached_settings.auto_guard_range or 4
+    local range_sq = range * range
+    local heavy_only = cached_settings.auto_guard_heavy_only
+    local now = Managers.time:time("main") or 0
+
+    local extension_manager = Managers.state and Managers.state.extension
+    if not extension_manager then return false end
+
+    local entities = extension_manager:get_entities("MinionHuskLocomotionExtension")
+    if not next(entities) then
+        entities = extension_manager:get_entities("MinionLocomotionExtension")
+        if not next(entities) then return false end
+    end
+
+    for unit, _ in pairs(entities) do
+        local health_ext = ScriptUnit_has_extension(unit, "health_system")
+        if not (health_ext and health_ext:is_alive()) then goto continue_guard end
+
+        local enemy_pos = POSITION_LOOKUP[unit]
+        if not enemy_pos then goto continue_guard end
+
+        local diff = enemy_pos - player_pos
+        if Vector3_dot(diff, diff) > range_sq then goto continue_guard end
+
+        -- Expire stale event-based windows.
+        local end_t = unit_attack_end_times[unit]
+        if end_t and now >= end_t then
+            unit_attack_end_times[unit]   = nil
+            unit_attack_is_heavy[unit]    = nil
+            unit_attack_start_times[unit] = nil
+            end_t = nil
+        end
+
+        local breed = _unit_breed_name[unit]
+
+        -- Primary polling: state machine node index.
+        -- Fires guard when animation_get_time[1] is in [GUARD_START_T, GUARD_END_T].
+        local sigs = breed and _breed_attack_state_sigs[breed]
+        if sigs then
+            local ok_s, s_tbl, s_n = pcall(Unit.animation_get_state, unit, _anim_state_scratch)
+            if ok_s and s_n and s_n > 0 and sigs[s_tbl[1]] then
+                -- Arm end_t/is_heavy for stale-window cleanup and heavy_only filtering.
+                if not end_t then
+                    unit_attack_start_times[unit] = now
+                    unit_attack_end_times[unit]   = now + ATTACK_ANIM_WINDOW
+                    unit_attack_is_heavy[unit]    = true
+                    end_t = unit_attack_end_times[unit]
+                end
+                if heavy_only and not unit_attack_is_heavy[unit] then
+                    goto continue_guard
+                end
+                local ok_t, t_tbl, t_n = pcall(Unit.animation_get_time, unit, _anim_time_scratch)
+                if ok_t and t_n and t_n > 0 then
+                    local t = t_tbl[1]
+                    if t >= GUARD_START_T and t <= GUARD_END_T then
+                        return true
+                    end
+                end
+                -- time unreadable or outside guard window
+            end
+        end
+
+        -- Fallback: wall-clock elapsed from the attack event timestamp.
+        -- Only used for breeds with no state-sig table.  When sigs exist, the attack
+        -- event fires partway into the charge state (measured ~218 ms in for groaners),
+        -- so start_times lags state entry by that offset.  Layer A (animation_get_time)
+        -- fires at state_entry+GUARD_START_T; Layer B would fire ~218 ms later, producing
+        -- a spurious second guard window after the hit.  Skip it when Layer A is available.
+        if end_t and not sigs then
+            if not heavy_only or unit_attack_is_heavy[unit] then
+                local elapsed = now - (unit_attack_start_times[unit] or now)
+                if elapsed >= GUARD_START_T and elapsed < GUARD_END_T then
+                    return true
+                end
+            end
+        end
+
+        ::continue_guard::
+    end
+
+    return false
+end
+
 local _get = function(func, self, action_name)
-    if self.type ~= "Ingame" or not cached_settings.enable_triggerbot then
+    if self.type ~= "Ingame" then
         return func(self, action_name)
     end
 
-    if action_name ~= "action_one_hold" and action_name ~= "action_one_pressed" then
+    -- Standalone auto-guard (always-on, independent of keybind).
+    -- Injects action_two_hold (the raw InputService input that the action_input_parser
+    -- maps to the "block" action input via the weapon template's action_inputs table).
+    -- Only applies when a melee weapon is equipped; ranged weapons use action_two_hold
+    -- for ADS and must not have it forced true.
+    if cached_settings.enable_auto_guard and auto_guard_blocking and is_melee_weapon_equipped() then
+        if action_name == "action_two_hold" then
+            return true
+        end
+    end
+
+    if not cached_settings.enable_triggerbot then
         return func(self, action_name)
     end
 
     local keybind = cached_settings.triggerbot_keybind
-    if next(keybind) and not triggerbot_pressed then
+    local keybind_active = not next(keybind) or triggerbot_pressed
+
+    -- Melee auto-fight: keybind held + melee weapon equipped
+    if keybind_active and is_melee_weapon_equipped() then
+        if auto_guard_blocking then
+            -- Power attack incoming: inject action_two_hold (the raw input the
+            -- action_input_parser maps to the "block" weapon action).
+            if action_name == "action_two_hold" then return true end
+        else
+            -- No threat: pulse action_one_hold briefly to simulate a quick tap (light attack),
+            -- but only when an enemy is actually within weapon reach.
+            -- Returning false during off-phase suppresses hold so it never charges to heavy.
+            if action_name == "action_one_hold" then
+                if not melee_enemy_in_range then
+                    return false
+                end
+                local now = Managers.time:time("main")
+                local elapsed = now - melee_press_last_t
+                local inject
+                if elapsed >= MELEE_PRESS_CYCLE then
+                    melee_press_last_t = now
+                    inject = true
+                else
+                    inject = elapsed < MELEE_PRESS_DURATION
+                end
+                return inject
+            end
+        end
+        return func(self, action_name)
+    end
+
+    -- Ranged triggerbot path: only intercept attack inputs
+    if action_name ~= "action_one_hold" and action_name ~= "action_one_pressed" then
+        return func(self, action_name)
+    end
+
+    if not keybind_active then
         return func(self, action_name)
     end
 
@@ -1180,13 +1444,133 @@ local _get = function(func, self, action_name)
     return func(self, action_name)
 end
 
+local function _on_attack_anim_event(unit, event_name, now)
+    -- Reset per-attack; combo attacks each get a fresh window.
+    -- Duplicate fires (host + listen-server same frame) use the same `now`, so safe.
+    unit_attack_start_times[unit] = now
+    unit_attack_end_times[unit] = now + ATTACK_ANIM_WINDOW
+    unit_attack_is_heavy[unit]  = event_name:sub(1, 12) == "attack_move_" or event_name:sub(1, 11) == "attack_run_"
+
+    local breed = _unit_breed_name[unit]
+    if not breed then return end
+
+    -- Snapshot the charge-state index; add to the sig table if unseen.
+    local ok_s, s_tbl, s_n = pcall(Unit.animation_get_state, unit, _anim_state_scratch)
+    if ok_s and s_n and s_n > 0 and s_tbl[1] then
+        local sigs = _breed_attack_state_sigs[breed]
+        if not sigs then sigs = {} ; _breed_attack_state_sigs[breed] = sigs end
+        if not sigs[s_tbl[1]] then
+            sigs[s_tbl[1]] = true
+            mod:info("[gambits][guard] new state sig: breed=%s event=%s heavy=%s state[1]=%s",
+                breed, event_name, tostring(unit_attack_is_heavy[unit]), tostring(s_tbl[1]))
+        end
+    end
+end
+
+-- Attack event names to probe at unit spawn. index_by_animation_event returns the
+-- same numeric index that rpc_minion_anim_event carries, so pre-populating the cache
+-- here makes the client path work without waiting for the server to fire any event.
+local KNOWN_ATTACK_EVENTS = {
+    "attack_01", "attack_02", "attack_03", "attack_04", "attack_05",
+    "attack_combo_standing_06",
+    "attack_move_01", "attack_move_02", "attack_move_03", "attack_move_04",
+    "attack_run_01",  "attack_run_02",  "attack_run_03",
+}
+
+-- Populate unit->breed map and attack-index cache on spawn (runs on both server and client).
+mod:hook_safe("MinionAnimationExtension", "init", function(self, extension_init_context, unit, extension_init_data, ...)
+    local breed = extension_init_data and extension_init_data.breed
+    if not breed or not breed.name then return end
+    _unit_breed_name[unit] = breed.name
+    local cache = _breed_attack_idx_cache[breed.name]
+    if not cache then
+        cache = {}
+        _breed_attack_idx_cache[breed.name] = cache
+    end
+    for _, ev in ipairs(KNOWN_ATTACK_EVENTS) do
+        local ok_h, has = pcall(Unit.has_animation_event, unit, ev)
+        if ok_h and has then
+            local ok_i, idx = pcall(Unit.index_by_animation_event, unit, ev)
+            if ok_i and idx and not cache[idx] then
+                cache[idx] = ev
+            end
+        end
+    end
+end)
+
+-- SERVER / HOST path: event name is available directly from the extension method.
+mod:hook_safe("MinionAnimationExtension", "anim_event", function(self, event_name, ...)
+    if not event_name or event_name:sub(1, 7) ~= "attack_" then return end
+    local unit = self._unit
+    if not unit then return end
+    _on_attack_anim_event(unit, event_name, (Managers.time and Managers.time:time("main")) or 0)
+end)
+
+-- Build a breed-level {event_index -> event_name} cache by intercepting Unit.animation_event.
+-- On a listen server the server calls Unit.animation_event(unit, name) before sending the RPC,
+-- so by the time rpc_minion_anim_event fires on the local client the cache is already populated.
+local _orig_unit_anim_event = Unit.animation_event
+Unit.animation_event = function(unit, event_name)
+    local idx = _orig_unit_anim_event(unit, event_name)
+    if event_name and event_name:sub(1, 7) == "attack_" and unit then
+        local breed_name = _unit_breed_name[unit]
+        if breed_name then
+            local cache = _breed_attack_idx_cache[breed_name]
+            if not cache then
+                cache = {}
+                _breed_attack_idx_cache[breed_name] = cache
+            end
+            if not cache[idx] then
+                cache[idx] = event_name
+            end
+        end
+    end
+    return idx
+end
+
+-- CLIENT path: event arrives as an index; resolve via the breed cache.
+mod:hook_safe("AnimationSystem", "rpc_minion_anim_event", function(self, channel_id, unit_id, event_index)
+    local unit_spawner = Managers.state and Managers.state.unit_spawner
+    if not unit_spawner then return end
+    local unit = unit_spawner:unit(unit_id)
+    if not unit then return end
+
+    local breed_name = _unit_breed_name[unit]
+    local cache = breed_name and _breed_attack_idx_cache[breed_name]
+    local event_name = cache and cache[event_index]
+
+    if not event_name or event_name:sub(1, 7) ~= "attack_" then return end
+    _on_attack_anim_event(unit, event_name, (Managers.time and Managers.time:time("main")) or 0)
+end)
+
 mod:hook("InputService", "_get", _get)
 mod:hook("InputService", "_get_simulate", _get)
 
 mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, unit, dt, t, frame)
     local player = Managers.player:local_player(1)
     if not player or not player:unit_is_alive() then
+        auto_guard_blocking = false
+        melee_enemy_in_range = false
         return
+    end
+
+    -- Auto guard: run scan when standalone guard is on, or when melee auto-fight is active
+    local keybind = cached_settings.triggerbot_keybind
+    local keybind_active = not next(keybind) or triggerbot_pressed
+
+    local melee_equipped = is_melee_weapon_equipped()
+    local melee_mode_active = cached_settings.enable_triggerbot and keybind_active and melee_equipped
+
+    if cached_settings.enable_auto_guard or melee_mode_active then
+        auto_guard_blocking = check_power_attack_incoming(unit)
+    else
+        auto_guard_blocking = false
+    end
+
+    if melee_mode_active then
+        melee_enemy_in_range = check_enemy_in_melee_range(unit)
+    else
+        melee_enemy_in_range = false
     end
 
     local use_mouse2 = cached_settings.use_mouse2_fallback

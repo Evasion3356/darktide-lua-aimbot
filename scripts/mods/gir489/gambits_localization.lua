@@ -184,6 +184,43 @@ local loc = {
         de = "Wenn aktiviert, hält der Triggerbot das Feuer zurück, wenn längeres Zielen durch den Chirurgie-Perk einen kritischen Treffer garantiert."
     },
 
+    -- Auto Guard Settings
+    auto_guard_settings = {
+        en = "Auto Guard Settings",
+        ru = "Настройки автоблока",
+        de = "Auto-Block-Einstellungen"
+    },
+    enable_auto_guard = {
+        en = "Enable Auto Guard",
+        ru = "Включить автоблок",
+        de = "Auto-Block aktivieren"
+    },
+    enable_auto_guard_description = {
+        en = "Automatically block when a nearby enemy is performing a power attack.",
+        ru = "Автоматически блокировать атаку, если ближайший враг наносит усиленный удар.",
+        de = "Automatisch blocken, wenn ein nahegelegener Feind einen Kraftangriff ausführt."
+    },
+    auto_guard_range = {
+        en = "Guard Detection Range (meters)",
+        ru = "Дальность обнаружения (метры)",
+        de = "Erkennungsreichweite (Meter)"
+    },
+    auto_guard_range_description = {
+        en = "Radius in meters to scan for incoming enemy attacks.",
+        ru = "Радиус в метрах для обнаружения вражеских атак.",
+        de = "Radius in Metern zum Scannen nach eingehenden feindlichen Angriffen."
+    },
+    auto_guard_heavy_only = {
+        en = "Power Attacks Only",
+        ru = "Только усиленные атаки",
+        de = "Nur Kraftangriffe"
+    },
+    auto_guard_heavy_only_description = {
+        en = "If enabled, only block attacks with a heavy damage profile or running charge. If disabled, block any melee attack.",
+        ru = "Если включено, блокировать только удары с тяжёлым профилем урона или атаки с разбега. Если выключено — блокировать любую атаку в ближнем бою.",
+        de = "Wenn aktiviert, nur Angriffe mit schwerem Schadensprofil oder Anrennangriff blocken. Wenn deaktiviert, jeden Nahkampfangriff blocken."
+    },
+
     -- Priority Targets
     priority_targets = {
         en = "Priority Targets",

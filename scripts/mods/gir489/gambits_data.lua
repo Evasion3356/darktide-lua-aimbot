@@ -164,6 +164,28 @@ return {
                 }
             },
             {
+                setting_id = "auto_guard_settings",
+                type = "group",
+                sub_widgets = {
+                    {
+                        setting_id = "enable_auto_guard",
+                        type = "checkbox",
+                        default_value = false
+                    },
+                    {
+                        setting_id = "auto_guard_range",
+                        type = "numeric",
+                        default_value = 4,
+                        range = { 1, 10 }
+                    },
+                    {
+                        setting_id = "auto_guard_heavy_only",
+                        type = "checkbox",
+                        default_value = true
+                    },
+                }
+            },
+            {
                 -- "Custom" profile — the original per-enemy dropdowns.
                 -- Only active when priority_profile == "custom" (or as
                 -- the auto fallback when no archetype can be detected).
