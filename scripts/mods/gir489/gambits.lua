@@ -8,6 +8,7 @@ local Sway = require("scripts/utilities/sway")
 local Suppression = require("scripts/utilities/attack/suppression")
 local WeaponMovementState = require("scripts/extension_systems/weapon/utilities/weapon_movement_state")
 local CriticalStrike = require("scripts/utilities/attack/critical_strike")
+local Dodge = require("scripts/extension_systems/character_state_machine/character_states/utilities/dodge")
 local DamageProfile = require("scripts/utilities/attack/damage_profile")
 local DamageCalculation = require("scripts/utilities/attack/damage_calculation")
 local PowerLevelSettings = require("scripts/settings/damage/power_level_settings")
@@ -865,32 +866,21 @@ local function auto_aim_priority_targets(player_unit)
                     end
                 end
 
-                if new_idx <= lock_idx then
-                    -- Same or higher-priority zone visible: accept immediately.
-                    -- This upgrades back to c_weakspot the moment it re-appears,
-                    -- even if a lower-priority zone (j_head) was the current lock.
-                    last_aim_unit = enemy.unit
-                    last_aim_zone = resolved_zone
-                    last_aim_zone_blocked_frames = 0
-                    has_target = true
-                    look_at_aim_target(enemy.unit, resolved_zone, player, shooting_pos, player_unit)
-                    return
-                elseif has_lock and last_aim_zone_blocked_frames < ZONE_GRACE_FRAMES then
+                if has_lock and new_idx > lock_idx and last_aim_zone_blocked_frames < ZONE_GRACE_FRAMES then
                     -- Only a lower-priority fallback is visible; hold the locked zone
                     -- to avoid downgrading due to transient occlusion (e.g. blob dip).
                     last_aim_zone_blocked_frames = last_aim_zone_blocked_frames + 1
                     has_target = true
                     look_at_aim_target(enemy.unit, last_aim_zone, player, shooting_pos, player_unit)
                     return
-                else
-                    -- Grace expired or no lock: accept the lower-priority zone.
-                    last_aim_unit = enemy.unit
-                    last_aim_zone = resolved_zone
-                    last_aim_zone_blocked_frames = 0
-                    has_target = true
-                    look_at_aim_target(enemy.unit, resolved_zone, player, shooting_pos, player_unit)
-                    return
                 end
+                -- Accept resolved_zone: same/higher-priority zone, grace expired, or no lock.
+                last_aim_unit = enemy.unit
+                last_aim_zone = resolved_zone
+                last_aim_zone_blocked_frames = 0
+                has_target = true
+                look_at_aim_target(enemy.unit, resolved_zone, player, shooting_pos, player_unit)
+                return
             elseif has_lock and last_aim_zone_blocked_frames < ZONE_GRACE_FRAMES then
                 -- Nothing visible at all; hold locked zone during grace.
                 last_aim_zone_blocked_frames = last_aim_zone_blocked_frames + 1
@@ -1260,6 +1250,13 @@ local _anim_time_scratch  = {}
 local function check_power_attack_incoming(player_unit)
     local player_pos = POSITION_LOOKUP[player_unit]
     if not player_pos then return false end
+
+    -- When the player is dodging, Dodge.is_dodging() returns true for melee attacks
+    -- and the game's reach/cone shrinkage causes the incoming attack to miss.
+    -- Raising the guard is unnecessary and suppresses the counter-swing pulse.
+    if Dodge.is_dodging(player_unit, "melee") then
+        return false
+    end
 
     local range = cached_settings.auto_guard_range or 4
     local range_sq = range * range
