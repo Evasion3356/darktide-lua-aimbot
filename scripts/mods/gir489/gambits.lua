@@ -12,6 +12,8 @@ local Dodge = require("scripts/extension_systems/character_state_machine/charact
 local DamageProfile = require("scripts/utilities/attack/damage_profile")
 local DamageCalculation = require("scripts/utilities/attack/damage_calculation")
 local PowerLevelSettings = require("scripts/settings/damage/power_level_settings")
+local PlayerUnitStatus = require("scripts/utilities/attack/player_unit_status")
+local BuffSettings = require("scripts/settings/buff/buff_settings")
 
 local HALF_PI = math.pi / 2
 
@@ -428,63 +430,33 @@ local function predict_spread_offset(player_unit)
     return Quaternion.multiply(pitch_rot, yaw_rot)
 end
 
--- Surgical perk (chance_based_on_aim_time) constants
-local SURGICAL_MAX_STACKS = 10
-local SURGICAL_CHANCE_PER_STACK = 0.10
+-- Fallback constants for Surgical (chance_based_on_aim_time) prediction.
+-- Real values are read from the buff template at runtime; see predict_crit_wait.
+local SURGICAL_MAX_STACKS_FALLBACK = 10
+local SURGICAL_CHANCE_PER_STEP_FALLBACK = 0.05
 
--- Inlined P2C table from PseudoRandomDistribution — maps floor(chance*100) to
--- the per-attempt constant C used by the PRD algorithm.  Avoids requiring the
--- game module (its transitive NetworkConstants dependency fails under the mod
--- framework's require).
-local PRD_P2C = {
-    0.0001560416916765, 0.0006200876164356, 0.0013861777203907, 0.0024485554716477,
-    0.0038016583035531, 0.0054401086148994, 0.0073587052890401, 0.009552415696806,
-    0.0120163681507952, 0.0147458447810727, 0.0177362748045691, 0.0209832281625322,
-    0.0244824095022856, 0.028229652481288,  0.0322209143730877, 0.0364522709562386,
-    0.0409199116686026, 0.045620135010803,  0.0505493441851718, 0.0557040429497818,
-    0.0610808317144988, 0.0666764036215081, 0.0724875433984468, 0.0785111206640039,
-    0.084744091852317,  0.091183460913123,  0.097826380485467,  0.104670227374915,
-    0.1117117582421034, 0.118949192725404,  0.1263793161208353, 0.1340008645349125,
-    0.1418051956867528, 0.1498100879493791, 0.1579830981257471, 0.166328776806438,
-    0.1749092435951354, 0.1836246523722508, 0.1924859579708838, 0.201547413607754,
-    0.2109200313959977, 0.2203645774003486, 0.2298986763626535, 0.2395401522844584,
-    0.2493069984401633, 0.2598723505886277, 0.270452936701194,  0.2810076352015464,
-    0.2915522666427177, 0.302103025348742,  0.3126766393399556, 0.3232905471447631,
-    0.3341199609425926, 0.3473699930849595, 0.3603978509331687, 0.3732168294719914,
-    0.3858396117819544, 0.3982783321856844, 0.4105446351769761, 0.4226497308103743,
-    0.434604447180966,  0.4464192805893383, 0.4581044439647123, 0.4696699141100894,
-    0.4811254783372292, 0.4924807810774478, 0.5074626865671641, 0.5294117647058825,
-    0.5507246376811594, 0.5714285714285715, 0.591549295774648,  0.6111111111111113,
-    0.6301369863013697, 0.6486486486486487, 0.6666666666666666, 0.6842105263157897,
-    0.7012987012987013, 0.717948717948718,  0.7341772151898737, 0.75,
-    0.7654320987654323, 0.7804878048780489, 0.795180722891566,  0.8095238095238093,
-    0.8235294117647058, 0.8372093023255812, 0.850574712643678,  0.8636363636363638,
-    0.8764044943820226, 0.8888888888888891, 0.9010989010989011, 0.9130434782608697,
-    0.9247311827956991, 0.9361702127659574, 0.9473684210526315, 0.9583333333333331,
-    0.9690721649484535, 0.979591836734694,  0.98989898989899,
-}
-
--- Pure re-implementation of PseudoRandomDistribution.flip_coin.
--- Returns is_crit (bool) only — we don't need the mutated state for prediction.
-local function prd_would_crit(chance, state, seed)
-    if chance >= 1 then return true end
-    if chance <= 0 then return false end
-
-    local c = PRD_P2C[math.floor(chance * 100)]
-    if not c then return false end
-
-    local math_next_random = math.next_random
-    local new_seed, value = math_next_random(seed)
-
-    if value < c then
-        _, value = math_next_random(new_seed)
-        return value < chance
-    end
-
-    local n = state or math.floor(chance / c)
-    _, value = math_next_random(new_seed)
-    return value < n * c
+-- Delegates to CriticalStrike.is_critical_strike, which lazy-requires
+-- PseudoRandomDistribution at runtime (when NetworkConstants is available).
+-- On the first call we probe with pcall; if it succeeds we replace ourselves
+-- with a zero-overhead direct call; if it fails we fall back to always-false
+-- (safe: predict_crit_wait will fire immediately rather than waiting).
+local prd_would_crit
+local function _prd_direct(chance, state, seed)
+    return (CriticalStrike.is_critical_strike(chance, state, seed))
 end
+local function _prd_fallback()
+    return false
+end
+local function _prd_probe(chance, state, seed)
+    local ok, result = pcall(CriticalStrike.is_critical_strike, chance, state, seed)
+    if ok then
+        prd_would_crit = _prd_direct
+        return result
+    end
+    prd_would_crit = _prd_fallback
+    return false
+end
+prd_would_crit = _prd_probe
 
 
 -- Estimates normal damage per hit against target_unit using
@@ -588,15 +560,30 @@ local function predict_crit_wait(player_unit)
         return "fire"
     end
 
-    -- Read current Surgical stack count directly from the buff.
+    -- Read current Surgical stack count and per-step constants from the buff.
     -- No buff found means the perk isn't equipped — fire immediately.
     local current_stacks = nil
+    local max_steps = SURGICAL_MAX_STACKS_FALLBACK
+    local chance_per_step = SURGICAL_CHANCE_PER_STEP_FALLBACK
     local buffs = buff_ext:buffs()
     for i = 1, #buffs do
         local buff = buffs[i]
         local name = buff:template().name
         if name and name:find("crit_chance_based_on_aim_time", 1, true) then
             current_stacks = buff:visual_stack_count()
+            local tmpl = buff:template()
+            -- Per-step crit chance: check template_override_data first (set per
+            -- weapon tier/level), then fall back to the base template value.
+            local crit_key = BuffSettings.stat_buffs.critical_strike_chance
+            local ctx_override = buff._template_context and buff._template_context.template_override_data
+            chance_per_step = (ctx_override and ctx_override.conditional_stat_buffs and ctx_override.conditional_stat_buffs[crit_key])
+                           or (tmpl.conditional_stat_buffs and tmpl.conditional_stat_buffs[crit_key])
+                           or SURGICAL_CHANCE_PER_STEP_FALLBACK
+            -- Max visual steps: call min_max_step_func if present.
+            if tmpl.min_max_step_func then
+                local ok, _, m = pcall(tmpl.min_max_step_func, buff._template_data, buff._template_context)
+                if ok and m then max_steps = m end
+            end
             break
         end
     end
@@ -606,8 +593,8 @@ local function predict_crit_wait(player_unit)
     end
 
     -- Simulate each additional stack to see if any produces a crit
-    for extra = 1, SURGICAL_MAX_STACKS - current_stacks do
-        local test_chance = math.clamp(current_chance + extra * SURGICAL_CHANCE_PER_STACK, 0, 1)
+    for extra = 1, max_steps - current_stacks do
+        local test_chance = math.clamp(current_chance + extra * chance_per_step, 0, 1)
         if prd_would_crit(math.round_with_precision(test_chance, 2), prd_state, seed) then
             -- Need extra more stacks; check if waiting is damage-efficient
             if last_aim_unit then
@@ -811,7 +798,7 @@ local function are_teammates_dead()
             if player.player_unit and ScriptUnit_has_extension(player.player_unit, "unit_data_system") then
                 local unit_data_extension = ScriptUnit_extension(player.player_unit, "unit_data_system")
                 local character_state_component = unit_data_extension:read_component("character_state")
-                if character_state_component and character_state_component.state_name == "hogtied" then
+                if character_state_component and PlayerUnitStatus.is_hogtied(character_state_component) then
                     return true
                 end
             end
