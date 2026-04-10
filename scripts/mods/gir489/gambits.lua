@@ -14,6 +14,8 @@ local DamageCalculation = require("scripts/utilities/attack/damage_calculation")
 local PowerLevelSettings = require("scripts/settings/damage/power_level_settings")
 local PlayerUnitStatus = require("scripts/utilities/attack/player_unit_status")
 local BuffSettings = require("scripts/settings/buff/buff_settings")
+local AttackSettings = require("scripts/settings/damage/attack_settings")
+local melee_attack_strengths = AttackSettings.melee_attack_strength
 
 local HALF_PI = math.pi / 2
 
@@ -29,6 +31,10 @@ local last_aim_zone = nil
 local last_aim_zone_blocked_frames = 0
 local ZONE_GRACE_FRAMES = 10
 
+-- Set true to log melee heavy/light decision diagnostics; flip false to silence.
+local MELEE_DEBUG = true
+local _melee_debug_last_unit = nil
+
 local BREED_PRIORITY_MAP = {
     -- Hound
     chaos_hound = "target_hounds", --Pox Hound
@@ -36,7 +42,7 @@ local BREED_PRIORITY_MAP = {
     chaos_armored_hound = "target_hounds", -- Armored Hound
     -- Boss Enemies
     chaos_beast_of_nurgle = "target_bosses", --Beast of Nurgle
-    chaos_plague_ogryn = "target_bosses", --Plague Ogyrn
+    chaos_plague_ogryn = "target_bosses", --Plague Ogryn
     chaos_spawn = "target_bosses", --Chaos Spawn
     cultist_captain = "target_bosses", --Admontion Champion
     renegade_captain = "target_bosses", --Scab Captain
@@ -1133,6 +1139,118 @@ local DEFAULT_ENEMY_RADIUS = 0.5 -- matches bot DEFAULT_ENEMY_HITBOX_RADIUS_APPR
 -- "in range" for auto-attack.  0.0 = front hemisphere (180° total cone).
 local MELEE_FOV_DOT = 0.0
 
+-- Heavy attack timing constants.
+-- HEAVY_COMMIT_DEFAULT: fallback minimum hold needed for the game to commit to a
+--   power attack rather than a light tap. The real value is read from the weapon
+--   template's action_inputs at runtime (the duration field on action_one_hold).
+-- HEAVY_SWING_BUFFER: flat post-release wait for the strike animation to complete.
+--   Releasing at the commit point fires the strike immediately (the remaining
+--   windup is skipped), so only the strike animation itself needs to be covered.
+local HEAVY_COMMIT_DEFAULT  = 0.3   -- seconds
+-- Extra hold past commit_time before releasing. light_attack and heavy_attack share
+-- the same threshold (light_to_heavy_timing): releasing at EXACTLY commit_time
+-- completes both sequences on the same frame and light_attack wins (listed first in
+-- the action_input_hierarchy).  Holding for commit_time + SLACK ensures light's
+-- time_window has expired so only heavy_attack can complete on release.
+local HEAVY_COMMIT_SLACK    = 0.05  -- ~1.5 fixed-update ticks at 30 hz
+local HEAVY_SWING_BUFFER    = 0.6   -- seconds (safety fallback for phase-2 expiry)
+
+-- Breeds whose boss void-shield determines the melee attack type: light when the
+-- shield is up (chip away at it), heavy when the shield is down (punish the opening).
+local VOID_SHIELD_BREEDS = {
+    cultist_captain           = true, -- Admonition Champion
+    renegade_captain          = true, -- Scab Captain
+    renegade_twin_captain     = true, -- Rodin Karnak
+    renegade_twin_captain_two = true, -- Rinda Karnak
+}
+
+-- Heavy attack state machine: 0 = idle, 1 = charging (holding), 2 = recovering (released)
+local melee_heavy_phase       = 0
+local melee_heavy_start_t     = 0
+local melee_heavy_charge_time    = HEAVY_COMMIT_DEFAULT  -- minimum hold to commit to heavy (cached)
+-- Set by check_enemy_in_melee_range to the closest valid target in range.
+local melee_target_unit        = nil
+local melee_target_needs_heavy = false  -- true when target is boss/elite/special
+local melee_target_needs_thrust = false -- true when target warrants waiting for full thrust stacks + activation
+
+
+-- Returns true when the equipped melee weapon has a power-activation weapon special
+-- (e.g. thunder hammer, power sword) that must fire before a heavy attack.
+-- Checks both that the weapon has a weapon_extra_action input binding AND that one of
+-- its actions has an activation kind; this avoids false-positives on push/utility specials.
+local function weapon_has_power_special(weapon_template)
+    if not weapon_template or not weapon_template.actions then return false end
+    for _, action in pairs(weapon_template.actions) do
+        local k = action.kind
+        if k == "activate_weapon" or k == "activatable_weapon_push" or k == "activate_special" then
+            return true
+        end
+    end
+    return false
+end
+
+-- Returns the raw InputService input name used to trigger the activation action
+-- (e.g. "weapon_extra_pressed").  Resolves through two layers:
+--   1. Find the action_inputs table key for the activate action (e.g. "weapon_extra_action").
+--   2. Read action_inputs[key].input_sequence[1].input for the raw input name that
+--      InputService._get is actually called with.
+local function get_power_special_input_key(weapon_template)
+    if not weapon_template or not weapon_template.actions then return "weapon_extra_pressed" end
+
+    -- Layer 1: find the action_inputs key for the activation action.
+    local action_input_key = nil
+    for _, action in pairs(weapon_template.actions) do
+        local k = action.kind
+        if k == "activate_weapon" or k == "activatable_weapon_push" or k == "activate_special" then
+            if action.input_entry then action_input_key = action.input_entry end
+            break
+        end
+    end
+    if not action_input_key and weapon_template.action_inputs then
+        if weapon_template.action_inputs.weapon_extra_action then
+            action_input_key = "weapon_extra_action"
+        else
+            for key in pairs(weapon_template.action_inputs) do
+                if key:find("extra", 1, true) or key:find("activate", 1, true) then
+                    action_input_key = key
+                    break
+                end
+            end
+        end
+    end
+
+    -- Layer 2: resolve the action_inputs entry to the raw input name.
+    if action_input_key and weapon_template.action_inputs then
+        local ai = weapon_template.action_inputs[action_input_key]
+        local seq = ai and ai.input_sequence
+        if seq and seq[1] and seq[1].input then
+            return seq[1].input
+        end
+    end
+
+    return "weapon_extra_pressed"
+end
+
+-- Returns true when the wielded weapon's special_active flag is set, meaning the
+-- thunder hammer (or power sword) is currently powered up and ready to deliver
+-- an energised strike.  Reads the inventory slot component directly so the
+-- check is always in sync with what the game engine reports.
+local function _is_weapon_special_active(player_unit)
+    local unit_data_ext = ScriptUnit_has_extension(player_unit, "unit_data_system")
+    if not unit_data_ext then return false end
+    local inventory_comp = unit_data_ext:read_component("inventory")
+    if not inventory_comp then return false end
+    local wielded_slot = inventory_comp.wielded_slot
+    if not wielded_slot or wielded_slot == "" then return false end
+    local slot_comp = unit_data_ext:read_component(wielded_slot)
+    return slot_comp ~= nil and slot_comp.special_active == true
+end
+
+-- Activation phase: true while waiting for the weapon-special animation to complete.
+local melee_activating         = false
+local melee_activate_start_t   = 0
+local melee_activate_input_key = "weapon_extra_action"
+
 local function get_melee_reach(player_unit)
     local unit_data_ext = ScriptUnit_extension(player_unit, "unit_data_system")
     if not unit_data_ext then return DEFAULT_MELEE_REACH end
@@ -1155,11 +1273,118 @@ local function get_melee_reach(player_unit)
     return DEFAULT_MELEE_REACH
 end
 
+-- Returns the commit_time
+-- before the game registers a heavy_attack input (action_input_parser.lua evaluates
+-- element.duration as the required hold time; when elapsed while holding,
+-- element_completed = true and the sequence advances to the release step).
+-- Reads heavy_attack.input_sequence[1].duration directly — iterating all action_inputs
+-- via pairs() risks matching push_follow_up which has the same field.
+local function get_heavy_timings(weapon_template)
+    local commit_time = HEAVY_COMMIT_DEFAULT
+
+    if weapon_template then
+        local action_inputs = weapon_template.action_inputs
+        local heavy_atk = action_inputs and action_inputs.heavy_attack
+        local seq1 = heavy_atk and heavy_atk.input_sequence and heavy_atk.input_sequence[1]
+        if seq1 and seq1.duration and seq1.duration > 0 then
+            commit_time = seq1.duration
+        end
+    end
+
+    return commit_time
+end
+
+-- Returns true when the captain-class void shield is active on unit.
+-- The void shield is implemented as the captain's toughness (toughness_armor_type
+-- = void_shield), which is what the HUD shield bar reads.  Shield is up as long
+-- as toughness_percent > 0; at 0 it has been destroyed.
+local function is_void_shield_active(unit)
+    local toughness_ext = ScriptUnit_has_extension(unit, "toughness_system")
+    return toughness_ext ~= nil and toughness_ext:current_toughness_percent() > 0
+end
+
+-- Estimates damage per swing for light (want_heavy=false) or heavy (want_heavy=true)
+-- attacks against target_unit using the current melee weapon's damage profile and
+-- the target's armor type. Returns nil when the required data is unavailable.
+local function _estimate_melee_damage(player_unit, target_unit, want_heavy)
+    local unit_data_ext = ScriptUnit_extension(player_unit, "unit_data_system")
+    if not unit_data_ext then return nil end
+    local weapon_action_comp = unit_data_ext:read_component("weapon_action")
+    if not weapon_action_comp then return nil end
+    local weapon_template = WeaponTemplate.current_weapon_template(weapon_action_comp)
+    if not weapon_template or not weapon_template.actions then return nil end
+
+    local target_strength = want_heavy and melee_attack_strengths.heavy or melee_attack_strengths.light
+    local damage_profile = nil
+    local action_power_level = nil
+
+    for _, action in pairs(weapon_template.actions) do
+        if action.kind == "sweep" then
+            local dp = action.damage_profile
+            if dp and dp.melee_attack_strength == target_strength then
+                damage_profile = dp
+                action_power_level = action.power_level
+                break
+            end
+        end
+    end
+
+    if not damage_profile or not damage_profile.targets then return nil end
+
+    local power_level = action_power_level or PowerLevelSettings.default_power_level
+    local breed = Breed.unit_breed_or_nil(target_unit)
+    local armor_type = (breed and breed.armor_type) or "unarmored"
+    local target_settings = damage_profile.targets[1] or damage_profile.targets.default_target
+    if not target_settings then return nil end
+
+    local lerp_values = DamageProfile.lerp_values(damage_profile, player_unit)
+    local base_dmg = DamageCalculation.base_ui_damage(
+        damage_profile, target_settings, power_level, nil, nil, lerp_values)
+    if not base_dmg or base_dmg <= 0 then return nil end
+
+    local adm = DamageProfile.armor_damage_modifier(
+        "attack", damage_profile, target_settings, lerp_values,
+        armor_type, false, nil, false, 0)
+    local result = base_dmg * adm
+    return result > 0 and result or nil
+end
+
+-- Returns the current visual stack count of the Thrust (windup_increases_power)
+-- perk child buff, or nil if the perk is not equipped on this weapon. Parent buff
+-- presence is required so an absent child (0 stacks) is distinguished from the perk
+-- being entirely missing. At 3 stacks the power modifier is maxed; the charge is
+-- held until this point before releasing.
+local function _get_windup_power_stacks(player_unit)
+    local buff_ext = ScriptUnit_has_extension(player_unit, "buff_system")
+    if not buff_ext then return nil end
+    local buffs = buff_ext:buffs()
+    local has_parent = false
+    local stack_count = 0
+    for i = 1, #buffs do
+        local buff = buffs[i]
+        local tmpl = buff:template()
+        local name = tmpl and tmpl.name
+        if name then
+            if name:find("windup_increases_power_parent", 1, true) then
+                has_parent = true
+            elseif name:find("windup_increases_power_child", 1, true) then
+                stack_count = buff:visual_stack_count()
+            end
+        end
+    end
+    return has_parent and stack_count or nil
+end
+
 local function check_enemy_in_melee_range(player_unit)
+    melee_target_unit = nil
     local player_pos = POSITION_LOOKUP[player_unit]
-    if not player_pos then return false end
+    if not player_pos then return false, false end
 
     local reach = get_melee_reach(player_unit)
+    -- Captains with an active void shield are fought at slightly longer range
+    -- since the player needs to close distance to start stripping the shield.
+    local VOID_SHIELD_REACH_BONUS = 1.5
+    local void_shield_reach = reach + VOID_SHIELD_REACH_BONUS
 
     -- Get camera forward once for the FOV check below.
     local unit_data_ext = ScriptUnit_extension(player_unit, "unit_data_system")
@@ -1167,13 +1392,20 @@ local function check_enemy_in_melee_range(player_unit)
         Quaternion_forward(unit_data_ext:read_component("first_person").rotation)
 
     local extension_manager = Managers.state and Managers.state.extension
-    if not extension_manager then return false end
+    if not extension_manager then return false, false end
 
     local entities = extension_manager:get_entities("MinionHuskLocomotionExtension")
     if not next(entities) then
         entities = extension_manager:get_entities("MinionLocomotionExtension")
-        if not next(entities) then return false end
+        if not next(entities) then return false, false end
     end
+
+    -- Track the closest valid enemy and count regular (non-priority) enemies in range.
+    -- Priority = boss / elite / special / void-shield captain.
+    local best_unit       = nil
+    local best_dist_sq    = math.huge
+    local best_breed      = nil
+    local regular_in_range = 0  -- count of non-priority enemies in melee range
 
     for unit, _ in pairs(entities) do
         local health_ext = ScriptUnit_has_extension(unit, "health_system")
@@ -1182,29 +1414,138 @@ local function check_enemy_in_melee_range(player_unit)
         local enemy_pos = POSITION_LOOKUP[unit]
         if not enemy_pos then goto continue_range end
 
-        local unit_data_ext = ScriptUnit_has_extension(unit, "unit_data_system")
+        local enemy_data_ext = ScriptUnit_has_extension(unit, "unit_data_system")
         local enemy_radius = DEFAULT_ENEMY_RADIUS
-        if unit_data_ext then
-            local breed = unit_data_ext:breed()
-            if breed and breed.bot_hitbox_radius_approximation then
-                enemy_radius = breed.bot_hitbox_radius_approximation
-            end
+        local breed = enemy_data_ext and enemy_data_ext:breed()
+        if breed then
+            enemy_radius = breed.bot_hitbox_radius_approximation or DEFAULT_ENEMY_RADIUS
         end
 
         local diff = enemy_pos - player_pos
         local dist_sq = Vector3_dot(diff, diff)
-        if dist_sq <= (reach + enemy_radius) ^ 2 then
+        local effective_reach = (breed and VOID_SHIELD_BREEDS[breed.name]) and void_shield_reach or reach
+        if dist_sq <= (effective_reach + enemy_radius) ^ 2 then
             -- Reject enemies outside the front hemisphere so we don't swing at
             -- things directly behind the player.
             if forward and Vector3_dot(forward, Vector3_normalize(diff)) >= MELEE_FOV_DOT then
-                return true
+                local is_priority = breed and (
+                    VOID_SHIELD_BREEDS[breed.name] or
+                    breed.is_boss == true or
+                    (breed.tags ~= nil and (breed.tags.elite == true or breed.tags.special == true))
+                )
+                if not is_priority then
+                    regular_in_range = regular_in_range + 1
+                end
+                if dist_sq < best_dist_sq then
+                    best_dist_sq = dist_sq
+                    best_unit    = unit
+                    best_breed   = breed
+                end
             end
         end
 
         ::continue_range::
     end
 
-    return false
+    if best_unit then
+        melee_target_unit = best_unit
+        local needs_heavy  = false
+        local needs_thrust = false
+        if best_breed then
+            if VOID_SHIELD_BREEDS[best_breed.name] then
+                -- Light while shield is up (faster DPS in practice despite lower per-hit modifier).
+                -- Switch to heavy + activation + thrust once the shield breaks.
+                local shield_up = is_void_shield_active(best_unit)
+                needs_heavy  = not shield_up
+                needs_thrust = not shield_up
+            elseif best_breed.is_boss == true or
+                   (best_breed.tags ~= nil and (best_breed.tags.elite == true or best_breed.tags.special == true)) then
+                -- Priority target: full heavy + activation + thrust stacks.
+                needs_heavy  = true
+                needs_thrust = true
+            end
+            -- Regular enemies: light by default; basic heavy cleave if 3+ are in range.
+            -- No thrust wait and no activation in either case.
+            if not needs_heavy and regular_in_range >= 3 then
+                needs_heavy = true
+                -- needs_thrust stays false: release as soon as commit time elapses
+            end
+        end
+        melee_target_needs_thrust = needs_thrust
+        local tag_needs_heavy = needs_heavy
+        -- Damage-based refinement: only for priority targets (boss/elite/special).
+        -- Regular enemies always get light (or horde cleave), never upgraded by math.
+        local dbg_hp, dbg_light, dbg_heavy
+        local is_priority_target = best_breed and (
+            VOID_SHIELD_BREEDS[best_breed.name] or
+            best_breed.is_boss == true or
+            (best_breed.tags ~= nil and (best_breed.tags.elite == true or best_breed.tags.special == true))
+        )
+        if is_priority_target and not (best_breed and VOID_SHIELD_BREEDS[best_breed.name]) then
+            local hp_ext = ScriptUnit_has_extension(best_unit, "health_system")
+            local hp = hp_ext and hp_ext:current_health()
+            dbg_hp = hp
+            if hp and hp > 0 then
+                local light_dmg = _estimate_melee_damage(player_unit, best_unit, false)
+                dbg_light = light_dmg
+                if light_dmg and light_dmg >= hp then
+                    -- Light can 1-shot the target; no charge needed regardless of tags.
+                    needs_heavy  = false
+                    needs_thrust = false
+                    melee_target_needs_thrust = false
+                elseif light_dmg and light_dmg > 0 then
+                    local heavy_dmg = _estimate_melee_damage(player_unit, best_unit, true)
+                    dbg_heavy = heavy_dmg
+                    if heavy_dmg and heavy_dmg > 0 then
+                        local light_shots = math.ceil(hp / light_dmg)
+                        local heavy_shots = math.ceil(hp / heavy_dmg)
+                        if heavy_shots < light_shots then
+                            needs_heavy = true
+                        elseif heavy_shots > light_shots then
+                            needs_heavy  = false
+                            needs_thrust = false
+                            melee_target_needs_thrust = false
+                        end
+                    end
+                end
+            end
+        end
+        if MELEE_DEBUG and best_unit ~= _melee_debug_last_unit then
+            _melee_debug_last_unit = best_unit
+            local bn  = best_breed and best_breed.name or "nil"
+            local tgs = best_breed and best_breed.tags
+            mod:info("[melee_dbg] target=%s is_boss=%s elite=%s special=%s tag_heavy=%s final_heavy=%s",
+                bn, tostring(best_breed and best_breed.is_boss),
+                tostring(tgs and tgs.elite), tostring(tgs and tgs.special),
+                tostring(tag_needs_heavy), tostring(needs_heavy))
+            mod:info("[melee_dbg] hp=%s light_dmg=%s heavy_dmg=%s",
+                tostring(dbg_hp), tostring(dbg_light), tostring(dbg_heavy))
+            -- Dump every weapon action: kind + damage_profile.melee_attack_strength
+            local wac2 = unit_data_ext:read_component("weapon_action")
+            local wt2  = wac2 and WeaponTemplate.current_weapon_template(wac2)
+            if wt2 and wt2.actions then
+                mod:info("[melee_dbg] enum: heavy=%s light=%s",
+                    tostring(melee_attack_strengths.heavy), tostring(melee_attack_strengths.light))
+                for aname, action in pairs(wt2.actions) do
+                    if action.kind then
+                        local dp = action.damage_profile
+                        mod:info("[melee_dbg]   [%s] kind=%s dp_strength=%s input_entry=%s",
+                            tostring(aname), tostring(action.kind),
+                            dp and tostring(dp.melee_attack_strength) or "nil",
+                            tostring(action.input_entry))
+                    end
+                end
+                    mod:info("[melee_dbg] has_power_special=%s raw_input_key=%s",
+                        tostring(weapon_has_power_special(wt2)),
+                        tostring(get_power_special_input_key(wt2)))
+                else
+                    mod:info("[melee_dbg] no weapon template found")
+                end
+            end
+        return true, needs_heavy
+    end
+    _melee_debug_last_unit = nil
+    return false, false
 end
 
 -- Per-unit animation attack window tracking.
@@ -1358,23 +1699,48 @@ local _get = function(func, self, action_name)
             -- action_input_parser maps to the "block" weapon action).
             if action_name == "action_two_hold" then return true end
         else
-            -- No threat: pulse action_one_hold briefly to simulate a quick tap (light attack),
-            -- but only when an enemy is actually within weapon reach.
-            -- Returning false during off-phase suppresses hold so it never charges to heavy.
+            -- Power-weapon activation: pulse weapon_extra_action for one press duration,
+            -- then hold action_one_hold false until the animation window elapses.
+            if melee_activating then
+                if action_name == melee_activate_input_key then
+                    -- Re-pulse the activation key every MELEE_PRESS_CYCLE until the
+                    -- update loop observes special_active == true and clears melee_activating.
+                    local elapsed = (Managers.time:time("main") or 0) - melee_activate_start_t
+                    local cycle_pos = elapsed % MELEE_PRESS_CYCLE
+                    return cycle_pos < MELEE_PRESS_DURATION
+                end
+                if action_name == "action_one_hold" then
+                    return false
+                end
+            end
             if action_name == "action_one_hold" then
-                if not melee_enemy_in_range then
+                if not melee_enemy_in_range and melee_heavy_phase == 0 then
                     return false
                 end
                 local now = Managers.time:time("main")
-                local elapsed = now - melee_press_last_t
-                local inject
-                if elapsed >= MELEE_PRESS_CYCLE then
-                    melee_press_last_t = now
-                    inject = true
+                -- Once committed to a heavy charge, see it through even if the target
+                -- briefly steps out of range (flinch/knockback during charge-up).
+                if melee_heavy_phase == 1 then
+                    return true
+                elseif melee_heavy_phase == 2 then
+                    return false
+                elseif melee_target_needs_heavy then
+                    -- Phase 0: start a new heavy charge.
+                    melee_heavy_phase   = 1
+                    melee_heavy_start_t = now
+                    return true
                 else
-                    inject = elapsed < MELEE_PRESS_DURATION
+                    -- Light attack: pulse briefly.
+                    local elapsed = now - melee_press_last_t
+                    local inject
+                    if elapsed >= MELEE_PRESS_CYCLE then
+                        melee_press_last_t = now
+                        inject = true
+                    else
+                        inject = elapsed < MELEE_PRESS_DURATION
+                    end
+                    return inject
                 end
-                return inject
             end
         end
         return func(self, action_name)
@@ -1535,6 +1901,11 @@ mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, u
     if not player or not player:unit_is_alive() then
         auto_guard_blocking = false
         melee_enemy_in_range = false
+        melee_target_unit = nil
+        melee_target_needs_heavy  = false
+        melee_target_needs_thrust = false
+        melee_heavy_phase = 0
+        melee_activating = false
         return
     end
 
@@ -1551,10 +1922,91 @@ mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, u
         auto_guard_blocking = false
     end
 
+    -- Guard always wins: if a block is being injected, abort any in-progress
+    -- charge or activation so the state machine starts clean after the guard ends.
+    if auto_guard_blocking and (melee_heavy_phase > 0 or melee_activating) then
+        melee_heavy_phase = 0
+        melee_activating  = false
+    end
+
     if melee_mode_active then
-        melee_enemy_in_range = check_enemy_in_melee_range(unit)
+        local any_heavy_in_range
+        melee_enemy_in_range, any_heavy_in_range = check_enemy_in_melee_range(unit)
+        if melee_enemy_in_range then
+            melee_target_needs_heavy = any_heavy_in_range
+        elseif melee_heavy_phase == 0 then
+            melee_target_needs_heavy  = false
+            melee_target_needs_thrust = false
+        end
+        -- Run the phase state machine even when the enemy briefly leaves range
+        -- (flinch/knockback during charge-up); only idle when both are false.
+        if melee_enemy_in_range or melee_heavy_phase > 0 then
+            -- Cache the charge time so _get doesn't read the weapon template every frame.
+            local _udata = ScriptUnit_extension(unit, "unit_data_system")
+            local _wac   = _udata and _udata:read_component("weapon_action")
+            local _wt    = _wac and WeaponTemplate.current_weapon_template(_wac)
+            melee_heavy_charge_time = get_heavy_timings(_wt)
+            local now_melee = Managers.time:time("main") or 0
+            -- Trigger power-weapon activation before each heavy swing, but only when
+            -- the weapon is not already charged (handles misses where charge persists,
+            -- and re-charges after a hit that consumed the powered state).
+            -- Skip activation while the target's void shield is up: powered heavy deals
+            -- no extra damage to the shield (lerp_1 either way), so charge after it breaks.
+            local void_shield_up = melee_target_unit and is_void_shield_active(melee_target_unit)
+            if melee_enemy_in_range and melee_target_needs_heavy and melee_heavy_phase == 0 and not melee_activating then
+                if weapon_has_power_special(_wt) and not void_shield_up and melee_target_needs_thrust then
+                    if _is_weapon_special_active(unit) then
+                        -- Already charged (e.g. previous swing missed); skip straight to heavy.
+                        melee_heavy_phase   = 1
+                        melee_heavy_start_t = now_melee
+                    else
+                        melee_activating         = true
+                        melee_activate_start_t   = now_melee
+                        melee_activate_input_key = get_power_special_input_key(_wt)
+                    end
+                end
+            end
+            -- State-based transition: as soon as the game reports the weapon is charged,
+            -- begin the heavy swing.  This replaces the old fixed-time wait so the
+            -- transition is always in sync with the actual hammer animation.
+            if melee_activating and _is_weapon_special_active(unit) then
+                melee_activating    = false
+                melee_heavy_phase   = 1
+                melee_heavy_start_t = now_melee
+            end
+            -- Phase 1: release when the charge has been held long enough, and
+            -- (if the Thrust perk is equipped) until all 3 windup_increases_power
+            -- stacks have accumulated for maximum power.
+            if melee_heavy_phase == 1 then
+                if (now_melee - melee_heavy_start_t) >= melee_heavy_charge_time + HEAVY_COMMIT_SLACK then
+                    local thrust_stacks = _get_windup_power_stacks(unit)
+                    -- Only hold for 3 thrust stacks against priority targets (elite/boss/special).
+                    -- Horde cleave and other basic heavies release as soon as commit time elapses.
+                    if thrust_stacks == nil or not melee_target_needs_thrust or thrust_stacks >= 3 then
+                        melee_heavy_phase   = 2
+                        melee_heavy_start_t = now_melee
+                    end
+                end
+            -- Phase 2 expiry: the heavy action is complete when weapon_action.start_t
+            -- has advanced beyond the release time (a new action has started).
+            -- HEAVY_SWING_BUFFER is a safety fallback in case start_t is unavailable.
+            elseif melee_heavy_phase == 2 then
+                if (_wac and _wac.start_t > melee_heavy_start_t + 0.05)
+                or (now_melee - melee_heavy_start_t >= HEAVY_SWING_BUFFER) then
+                    melee_heavy_phase = 0
+                end
+            end
+        else
+            melee_heavy_phase = 0
+            melee_activating = false
+        end
     else
         melee_enemy_in_range = false
+        melee_target_unit = nil
+        melee_target_needs_heavy  = false
+        melee_target_needs_thrust = false
+        melee_heavy_phase = 0
+        melee_activating = false
     end
 
     local use_mouse2 = cached_settings.use_mouse2_fallback
