@@ -96,6 +96,16 @@ local loc = {
         ru = "Если включено, автонаведение будет отключено, когда любой товарищ по команде мёртв или связан.",
         de = "Wenn aktiviert, wird das Auto-Zielen deaktiviert, wenn ein Teammitglied tot ist."
     },
+    specials_only = {
+        en = "Specials Only",
+        ru = "Только особые враги",
+        de = "Nur Spezials"
+    },
+    specials_only_description = {
+        en = "If enabled, specials are always targeted. Non-specials are only targeted if they are actively targeting a player.",
+        ru = "Если включено, особые враги всегда являются целями. Обычные враги — только если они атакуют игрока.",
+        de = "Wenn aktiviert, werden Spezials immer anvisiert. Nicht-Spezials nur, wenn sie aktiv einen Spieler angreifen."
+    },
 
     -- Triggerbot Settings
     triggerbot_settings = {

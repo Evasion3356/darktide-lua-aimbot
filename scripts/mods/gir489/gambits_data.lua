@@ -111,6 +111,11 @@ return {
                         localize = true
                     },
                     {
+                        setting_id = "specials_only",
+                        type = "checkbox",
+                        default_value = true
+                    },
+                    {
                         setting_id = "enable_spread_compensation",
                         type = "checkbox",
                         default_value = true

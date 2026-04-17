@@ -196,6 +196,7 @@ local function refresh_settings()
     cached_settings.enable_auto_guard = mod:get("enable_auto_guard")
     cached_settings.auto_guard_range = mod:get("auto_guard_range")
     cached_settings.auto_guard_heavy_only = mod:get("auto_guard_heavy_only")
+    cached_settings.specials_only = mod:get("specials_only")
 
     -- Build a [class][breed_name] -> priority lookup table for get_breed_priority.
     local pt = cached_settings.priority_target or {}
@@ -281,6 +282,10 @@ local function get_all_enemies()
     local player = Managers.player:local_player(1)
     local player_pos = player and player.player_unit and POSITION_LOOKUP[player.player_unit]
 
+    local specials_only = cached_settings.specials_only
+    local game_session = specials_only and Managers.state.game_session and Managers.state.game_session:game_session()
+    local unit_spawner = specials_only and Managers.state.unit_spawner
+
     local n = 0
 
     for unit, _ in pairs(entities) do
@@ -290,6 +295,14 @@ local function get_all_enemies()
             local breed = unit_data_ext:breed()
             if not breed or breed.breed_type == "player" or (breed.name and breed.name:find("hazard")) then
                 goto next_unit
+            end
+
+            if specials_only and not (breed.tags and breed.tags.special) then
+                local go_id = unit_spawner and unit_spawner:game_object_id(unit)
+                local target_unit_id = go_id and game_session and GameSession.game_object_field(game_session, go_id, "target_unit_id")
+                if not target_unit_id or target_unit_id == NetworkConstants.invalid_game_object_id then
+                    goto next_unit
+                end
             end
 
             local breed_name = breed.name
@@ -1123,6 +1136,7 @@ end
 mod.toggle_triggerbot = function(is_pressed)
     triggerbot_pressed = is_pressed
 end
+
 
 -- Auto guard state: true when a nearby enemy is executing a power attack
 local auto_guard_blocking = false
