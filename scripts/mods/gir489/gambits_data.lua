@@ -111,6 +111,11 @@ return {
                         localize = true
                     },
                     {
+                        setting_id = "specials_only",
+                        type = "checkbox",
+                        default_value = true
+                    },
+                    {
                         setting_id = "enable_spread_compensation",
                         type = "checkbox",
                         default_value = true
@@ -148,6 +153,11 @@ return {
                         default_value = false
                     },
                     {
+                        setting_id = "wait_for_crits",
+                        type = "checkbox",
+                        default_value = true
+                    },
+                    {
                         setting_id = "triggerbot_keybind",
                         type = "keybind",
                         default_value = {"extra_2"},
@@ -156,6 +166,28 @@ return {
                         keybind_type = "function_call",
                         function_name = "toggle_triggerbot"
                     }
+                }
+            },
+            {
+                setting_id = "auto_guard_settings",
+                type = "group",
+                sub_widgets = {
+                    {
+                        setting_id = "enable_auto_guard",
+                        type = "checkbox",
+                        default_value = false
+                    },
+                    {
+                        setting_id = "auto_guard_range",
+                        type = "numeric",
+                        default_value = 4,
+                        range = { 1, 10 }
+                    },
+                    {
+                        setting_id = "auto_guard_heavy_only",
+                        type = "checkbox",
+                        default_value = true
+                    },
                 }
             },
             {

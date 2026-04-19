@@ -96,6 +96,16 @@ local loc = {
         ru = "Если включено, автонаведение будет отключено, когда любой товарищ по команде мёртв или связан.",
         de = "Wenn aktiviert, wird das Auto-Zielen deaktiviert, wenn ein Teammitglied tot ist."
     },
+    specials_only = {
+        en = "Specials Only",
+        ru = "Только особые враги",
+        de = "Nur Spezials"
+    },
+    specials_only_description = {
+        en = "If enabled, specials are always targeted. Non-specials are only targeted if they are actively targeting a player.",
+        ru = "Если включено, особые враги всегда являются целями. Обычные враги — только если они атакуют игрока.",
+        de = "Wenn aktiviert, werden Spezials immer anvisiert. Nicht-Spezials nur, wenn sie aktiv einen Spieler angreifen."
+    },
 
     -- Triggerbot Settings
     triggerbot_settings = {
@@ -172,6 +182,53 @@ local loc = {
         en = "If enabled, aim and triggerbot raycast will predict and compensate for weapon spread.",
         ru = "Если включено, прицел и луч триггербота будут предсказывать и компенсировать разброс оружия.",
         de = "Wenn aktiviert, werden Zielen und Triggerbot-Raycast die Waffenstreuung vorhersagen und kompensieren."
+    },
+    wait_for_crits = {
+        en = "Wait for Surgical Crits",
+        ru = "Ждать критов (Хирург)",
+        de = "Auf Chirurgie-Krit warten"
+    },
+    wait_for_crits_description = {
+        en = "If enabled, triggerbot will hold fire when aiming longer will guarantee a critical hit via the Surgical perk.",
+        ru = "Если включено, триггербот удерживает огонь, если дополнительное время прицеливания гарантирует критический удар через перк «Хирург».",
+        de = "Wenn aktiviert, hält der Triggerbot das Feuer zurück, wenn längeres Zielen durch den Chirurgie-Perk einen kritischen Treffer garantiert."
+    },
+
+    -- Auto Guard Settings
+    auto_guard_settings = {
+        en = "Auto Guard Settings",
+        ru = "Настройки автоблока",
+        de = "Auto-Block-Einstellungen"
+    },
+    enable_auto_guard = {
+        en = "Enable Auto Guard",
+        ru = "Включить автоблок",
+        de = "Auto-Block aktivieren"
+    },
+    enable_auto_guard_description = {
+        en = "Automatically block when a nearby enemy is performing a power attack.",
+        ru = "Автоматически блокировать атаку, если ближайший враг наносит усиленный удар.",
+        de = "Automatisch blocken, wenn ein nahegelegener Feind einen Kraftangriff ausführt."
+    },
+    auto_guard_range = {
+        en = "Guard Detection Range (meters)",
+        ru = "Дальность обнаружения (метры)",
+        de = "Erkennungsreichweite (Meter)"
+    },
+    auto_guard_range_description = {
+        en = "Radius in meters to scan for incoming enemy attacks.",
+        ru = "Радиус в метрах для обнаружения вражеских атак.",
+        de = "Radius in Metern zum Scannen nach eingehenden feindlichen Angriffen."
+    },
+    auto_guard_heavy_only = {
+        en = "Power Attacks Only",
+        ru = "Только усиленные атаки",
+        de = "Nur Kraftangriffe"
+    },
+    auto_guard_heavy_only_description = {
+        en = "If enabled, only block attacks with a heavy damage profile or running charge. If disabled, block any melee attack.",
+        ru = "Если включено, блокировать только удары с тяжёлым профилем урона или атаки с разбега. Если выключено — блокировать любую атаку в ближнем бою.",
+        de = "Wenn aktiviert, nur Angriffe mit schwerem Schadensprofil oder Anrennangriff blocken. Wenn deaktiviert, jeden Nahkampfangriff blocken."
     },
 
     -- Priority Targets
