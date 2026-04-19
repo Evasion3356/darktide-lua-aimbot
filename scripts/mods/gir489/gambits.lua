@@ -32,7 +32,7 @@ local last_aim_zone_blocked_frames = 0
 local ZONE_GRACE_FRAMES = 10
 
 -- Set true to log melee heavy/light decision diagnostics; flip false to silence.
-local MELEE_DEBUG = true
+local MELEE_DEBUG = false
 local _melee_debug_last_unit = nil
 
 local BREED_PRIORITY_MAP = {
@@ -110,6 +110,12 @@ local POXBURSTER_BREEDS = {
 local DAEMONHOST_BREEDS = {
     chaos_daemonhost = true,
     chaos_mutator_daemonhost = true,
+}
+
+local POXHOUNDS_BREEDS = {
+    chaos_hound = true,
+    chaos_hound_mutator = true,
+	chaos_armored_hound = true,
 }
 
 -- Per-breed ordered aim zone list. Each zone is tried front-to-back; the first
@@ -297,7 +303,7 @@ local function get_all_enemies()
                 goto next_unit
             end
 
-            if specials_only and not (breed.tags and breed.tags.special) then
+            if specials_only and not (breed.tags and breed.tags.special and not POXHOUNDS_BREEDS[breed.name]) then
                 local go_id = unit_spawner and unit_spawner:game_object_id(unit)
                 local target_unit_id = go_id and game_session and GameSession.game_object_field(game_session, go_id, "target_unit_id")
                 if not target_unit_id or target_unit_id == NetworkConstants.invalid_game_object_id then
@@ -1144,6 +1150,12 @@ local auto_guard_blocking = false
 local melee_enemy_in_range = false
 -- Melee auto-attack pulse: simulate press→release so the game sees a rising edge each cycle
 local melee_press_last_t = 0
+-- Equip-delay: suppress attacks briefly after drawing melee to avoid misfiring during wield anim.
+local melee_last_equip_t    = -math.huge
+local _last_melee_equipped  = false
+local MELEE_EQUIP_DELAY     = 0.55  -- matches ogryn_pickaxe action_wield total_time
+-- Cached each frame: true when the wielded melee weapon is an Ogryn pickaxe.
+local melee_is_pickaxe      = false
 local MELEE_PRESS_CYCLE    = 0.35  -- seconds between press pulses
 local MELEE_PRESS_DURATION = 0.05  -- seconds to hold the press true
 
@@ -1507,7 +1519,9 @@ local function check_enemy_in_melee_range(player_unit)
                     needs_heavy  = false
                     needs_thrust = false
                     melee_target_needs_thrust = false
-                elseif light_dmg and light_dmg > 0 then
+                elseif not tag_needs_heavy and light_dmg and light_dmg > 0 then
+                    -- Multi-shot comparison only for non-priority targets (e.g. horde cleave check).
+                    -- Priority targets (elite/boss) always get heavy once they survive a light one-shot.
                     local heavy_dmg = _estimate_melee_damage(player_unit, best_unit, true)
                     dbg_heavy = heavy_dmg
                     if heavy_dmg and heavy_dmg > 0 then
@@ -1732,13 +1746,19 @@ local _get = function(func, self, action_name)
                     return false
                 end
                 local now = Managers.time:time("main")
+                -- Suppress all attacks during the wield animation to prevent the heavy
+                -- windup from firing and looking like an unintended alt attack.
+                if (now - melee_last_equip_t) < MELEE_EQUIP_DELAY then
+                    return false
+                end
                 -- Once committed to a heavy charge, see it through even if the target
                 -- briefly steps out of range (flinch/knockback during charge-up).
                 if melee_heavy_phase == 1 then
                     return true
                 elseif melee_heavy_phase == 2 then
                     return false
-                elseif melee_target_needs_heavy then
+                end
+                if melee_target_needs_heavy then
                     -- Phase 0: start a new heavy charge.
                     melee_heavy_phase   = 1
                     melee_heavy_start_t = now
@@ -1750,6 +1770,15 @@ local _get = function(func, self, action_name)
                     if elapsed >= MELEE_PRESS_CYCLE then
                         melee_press_last_t = now
                         inject = true
+                        if MELEE_DEBUG then
+                            local bn = melee_target_unit and Breed and Breed.unit_breed_or_nil(melee_target_unit)
+                            bn = bn and bn.name or "nil"
+                            mod:info("[melee_dbg] LIGHT fired: target=%s in_range=%s needs_heavy=%s phase=%s",
+                                bn,
+                                tostring(melee_enemy_in_range),
+                                tostring(melee_target_needs_heavy),
+                                tostring(melee_heavy_phase))
+                        end
                     else
                         inject = elapsed < MELEE_PRESS_DURATION
                     end
@@ -1920,6 +1949,8 @@ mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, u
         melee_target_needs_thrust = false
         melee_heavy_phase = 0
         melee_activating = false
+        melee_is_pickaxe = false
+        _last_melee_equipped = false
         return
     end
 
@@ -1930,6 +1961,12 @@ mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, u
     local melee_equipped = is_melee_weapon_equipped()
     local melee_mode_active = cached_settings.enable_triggerbot and keybind_active and melee_equipped
 
+    -- Track when melee is first drawn so we can suppress attacks during the wield animation.
+    if melee_equipped and not _last_melee_equipped then
+        melee_last_equip_t = Managers.time:time("main") or 0
+    end
+    _last_melee_equipped = melee_equipped
+
     if cached_settings.enable_auto_guard or melee_mode_active then
         auto_guard_blocking = check_power_attack_incoming(unit)
     else
@@ -1938,9 +1975,13 @@ mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, u
 
     -- Guard always wins: if a block is being injected, abort any in-progress
     -- charge or activation so the state machine starts clean after the guard ends.
+    -- Exception: for the pickaxe in phase 1, keep the charge state so the game
+    -- buffers start_attack and restarts the windup as soon as the block ends.
     if auto_guard_blocking and (melee_heavy_phase > 0 or melee_activating) then
-        melee_heavy_phase = 0
-        melee_activating  = false
+        if not (melee_is_pickaxe and melee_heavy_phase == 1) then
+            melee_heavy_phase = 0
+            melee_activating  = false
+        end
     end
 
     if melee_mode_active then
@@ -1948,6 +1989,7 @@ mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, u
         melee_enemy_in_range, any_heavy_in_range = check_enemy_in_melee_range(unit)
         if melee_enemy_in_range then
             melee_target_needs_heavy = any_heavy_in_range
+
         elseif melee_heavy_phase == 0 then
             melee_target_needs_heavy  = false
             melee_target_needs_thrust = false
@@ -1960,6 +2002,7 @@ mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, u
             local _wac   = _udata and _udata:read_component("weapon_action")
             local _wt    = _wac and WeaponTemplate.current_weapon_template(_wac)
             melee_heavy_charge_time = get_heavy_timings(_wt)
+            melee_is_pickaxe = _wt ~= nil and _wt.name ~= nil and _wt.name:find("ogryn_pickaxe", 1, true) ~= nil
             local now_melee = Managers.time:time("main") or 0
             -- Trigger power-weapon activation before each heavy swing, but only when
             -- the weapon is not already charged (handles misses where charge persists,
@@ -1994,6 +2037,20 @@ mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, u
             if melee_heavy_phase == 1 then
                 if (now_melee - melee_heavy_start_t) >= melee_heavy_charge_time + HEAVY_COMMIT_SLACK then
                     local thrust_stacks = _get_windup_power_stacks(unit)
+                    if MELEE_DEBUG then
+                        local buff_ext = ScriptUnit_has_extension(unit, "buff_system")
+                        local buffs = buff_ext and buff_ext:buffs()
+                        if buffs then
+                            for i = 1, #buffs do
+                                local b = buffs[i]
+                                local tmpl = b:template()
+                                local bname = tmpl and tmpl.name or "nil"
+                                mod:info("[melee_dbg] phase1_buff[%d] name=%s stacks=%s", i, bname, tostring(b:visual_stack_count()))
+                            end
+                        end
+                        mod:info("[melee_dbg] phase1_release: thrust_stacks=%s needs_thrust=%s held=%.3fs",
+                            tostring(thrust_stacks), tostring(melee_target_needs_thrust), now_melee - melee_heavy_start_t)
+                    end
                     -- Only hold for 3 thrust stacks against priority targets (elite/boss/special).
                     -- Horde cleave and other basic heavies release as soon as commit time elapses.
                     if thrust_stacks == nil or not melee_target_needs_thrust or thrust_stacks >= 3 then
@@ -2021,6 +2078,7 @@ mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, u
         melee_target_needs_thrust = false
         melee_heavy_phase = 0
         melee_activating = false
+        melee_is_pickaxe = false
     end
 
     local use_mouse2 = cached_settings.use_mouse2_fallback
