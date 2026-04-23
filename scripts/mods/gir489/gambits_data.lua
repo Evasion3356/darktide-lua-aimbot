@@ -32,6 +32,10 @@ local profile_options = {
 
 local function make_target_widgets(prefix, d)
     return {
+        { setting_id = prefix.."triggerbot_use_raycast",      type = "checkbox", default_value = d.use_raycast      },
+        { setting_id = prefix.."triggerbot_weakspot_only",    type = "checkbox", default_value = d.weakspot_only    },
+        { setting_id = prefix.."triggerbot_respect_priority", type = "checkbox", default_value = d.respect_priority },
+        { setting_id = prefix.."wait_for_crits",              type = "checkbox", default_value = d.wait_for_crits   },
         { setting_id = prefix.."target_bosses",         type = "dropdown", options = priority_options, default_value = d.bosses         },
         { setting_id = prefix.."target_berzerkers",     type = "dropdown", options = priority_options, default_value = d.berzerkers     },
         { setting_id = prefix.."target_hounds",         type = "dropdown", options = priority_options, default_value = d.hounds         },
@@ -51,16 +55,16 @@ local function make_target_widgets(prefix, d)
     }
 end
 
--- Per-class default priorities.
+-- Per-class default priorities and behavior flags.
 -- Veteran: ranged specialist — punishes snipers/trappers/hounds hardest.
 -- Zealot:  melee rusher — prioritises threats that pin or charge.
 -- Psyker:  glass cannon — avoids being grabbed; snipers/trappers lethal.
--- Ogryn:   slow tank — specials exploit the lack of mobility.
+-- Ogryn:   slow tank — specials exploit the lack of mobility; no weakspot/crit perk synergy.
 local CLASS_DEFAULTS = {
-    veteran = { bosses=2, berzerkers=8, hounds=12, netgunners=13, flamers=7, snipers=15, bombers=11, poxwalkers=14, gunners=9, mutants=6, crushers=2, bulwarks=5, reapers=10, mauler=4, melee_regular=0, ranged_regular=0 },
-    zealot  = { bosses=2, berzerkers=8, hounds=12, netgunners=13, flamers=7, snipers=15, bombers=11, poxwalkers=14, gunners=9, mutants=6, crushers=2, bulwarks=5, reapers=10, mauler=4, melee_regular=0, ranged_regular=0 },
-    psyker  = { bosses=2, berzerkers=8, hounds=12, netgunners=13, flamers=7, snipers=15, bombers=11, poxwalkers=14, gunners=9, mutants=6, crushers=2, bulwarks=5, reapers=10, mauler=4, melee_regular=0, ranged_regular=0 },
-    ogryn   = { bosses=4, berzerkers=8, hounds=12, netgunners=13, flamers=7, snipers=15, bombers=11, poxwalkers=14, gunners=9, mutants=6, crushers=0, bulwarks=5, reapers=10, mauler=0, melee_regular=0, ranged_regular=3 },
+    veteran = { use_raycast=true, weakspot_only=true, respect_priority=false, wait_for_crits=true,  bosses=2, berzerkers=8, hounds=12, netgunners=13, flamers=7, snipers=15, bombers=11, poxwalkers=14, gunners=9, mutants=6, crushers=2, bulwarks=5, reapers=10, mauler=4, melee_regular=0, ranged_regular=0 },
+    zealot  = { use_raycast=true, weakspot_only=true, respect_priority=false, wait_for_crits=true,  bosses=2, berzerkers=8, hounds=12, netgunners=13, flamers=7, snipers=15, bombers=11, poxwalkers=14, gunners=9, mutants=6, crushers=2, bulwarks=5, reapers=10, mauler=4, melee_regular=0, ranged_regular=0 },
+    psyker  = { use_raycast=true, weakspot_only=true, respect_priority=false, wait_for_crits=true,  bosses=2, berzerkers=8, hounds=12, netgunners=13, flamers=7, snipers=15, bombers=11, poxwalkers=14, gunners=9, mutants=6, crushers=2, bulwarks=5, reapers=10, mauler=4, melee_regular=0, ranged_regular=0 },
+    ogryn   = { use_raycast=true, weakspot_only=false, respect_priority=false, wait_for_crits=false, bosses=4, berzerkers=8, hounds=12, netgunners=13, flamers=7, snipers=15, bombers=11, poxwalkers=14, gunners=9, mutants=6, crushers=0, bulwarks=5, reapers=10, mauler=0, melee_regular=0, ranged_regular=3 },
 }
 
 return {
@@ -126,6 +130,15 @@ return {
                         options = profile_options,
                         default_value = "auto"
                     },
+                    {
+                        setting_id = "boss_lock_keybind",
+                        type = "keybind",
+                        default_value = {"left shift"},
+                        keybind_global = true,
+                        keybind_trigger = "held",
+                        keybind_type = "function_call",
+                        function_name = "toggle_boss_lock"
+                    },
                 }
             },
             {
@@ -134,26 +147,6 @@ return {
                 sub_widgets = {
                     {
                         setting_id = "enable_triggerbot",
-                        type = "checkbox",
-                        default_value = true
-                    },
-                    {
-                        setting_id = "triggerbot_use_raycast",
-                        type = "checkbox",
-                        default_value = true
-                    },
-                    {
-                        setting_id = "triggerbot_weakspot_only",
-                        type = "checkbox",
-                        default_value = true
-                    },
-                    {
-                        setting_id = "triggerbot_respect_priority",
-                        type = "checkbox",
-                        default_value = false
-                    },
-                    {
-                        setting_id = "wait_for_crits",
                         type = "checkbox",
                         default_value = true
                     },

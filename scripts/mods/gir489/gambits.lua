@@ -21,6 +21,7 @@ local HALF_PI = math.pi / 2
 
 local aim_button_pressed = false
 local triggerbot_pressed = false
+local boss_lock_pressed = false
 local has_target = false
 local last_semi_auto_fire_time = 0
 -- Zone-lock hysteresis: when the preferred zone is briefly occluded by a
@@ -188,9 +189,7 @@ local cached_settings = {}
 local function refresh_settings()
     cached_settings.enable_triggerbot = mod:get("enable_triggerbot")
     cached_settings.triggerbot_keybind = mod:get("triggerbot_keybind")
-    cached_settings.triggerbot_use_raycast = mod:get("triggerbot_use_raycast")
-    cached_settings.triggerbot_weakspot_only = mod:get("triggerbot_weakspot_only")
-    cached_settings.triggerbot_respect_priority = mod:get("triggerbot_respect_priority")
+    cached_settings.boss_lock_keybind = mod:get("boss_lock_keybind")
     cached_settings.require_main_weapon = mod:get("require_main_weapon")
     cached_settings.use_mouse2_fallback = mod:get("use_mouse2_fallback")
     cached_settings.enable_fov_check = mod:get("enable_fov_check")
@@ -198,7 +197,6 @@ local function refresh_settings()
     cached_settings.disable_when_teammates_are_dead = mod:get("disable_when_teammates_are_dead")
     cached_settings.priority_profile = mod:get("priority_profile")
     cached_settings.enable_spread_compensation = mod:get("enable_spread_compensation")
-    cached_settings.wait_for_crits = mod:get("wait_for_crits")
     cached_settings.enable_auto_guard = mod:get("enable_auto_guard")
     cached_settings.auto_guard_range = mod:get("auto_guard_range")
     cached_settings.auto_guard_heavy_only = mod:get("auto_guard_heavy_only")
@@ -206,14 +204,23 @@ local function refresh_settings()
 
     -- Build a [class][breed_name] -> priority lookup table for get_breed_priority.
     local pt = cached_settings.priority_target or {}
+    local pb = cached_settings.profile_behaviors or {}
     for class, prefix in pairs(PROFILE_PREFIXES) do
         local class_tbl = pt[class] or {}
         for breed_name, base_key in pairs(BREED_PRIORITY_MAP) do
             class_tbl[breed_name] = mod:get(prefix .. base_key) or 0
         end
         pt[class] = class_tbl
+
+        pb[class] = {
+            triggerbot_use_raycast      = mod:get(prefix .. "triggerbot_use_raycast"),
+            triggerbot_weakspot_only    = mod:get(prefix .. "triggerbot_weakspot_only"),
+            triggerbot_respect_priority = mod:get(prefix .. "triggerbot_respect_priority"),
+            wait_for_crits              = mod:get(prefix .. "wait_for_crits"),
+        }
     end
     cached_settings.priority_target = pt
+    cached_settings.profile_behaviors = pb
 end
 refresh_settings()
 
@@ -252,6 +259,18 @@ local function is_poxburster_safe_to_target(unit)
     end
 
     return true
+end
+
+local function get_active_profile_behaviors()
+    local profile = cached_settings.priority_profile or "auto"
+    local class
+    if profile == "auto" then
+        class = get_player_archetype() or "custom"
+    else
+        class = profile
+    end
+    local pb = cached_settings.profile_behaviors
+    return (pb and pb[class]) or (pb and pb["custom"]) or {}
 end
 
 local function get_breed_priority(breed_name, unit)
@@ -300,6 +319,10 @@ local function get_all_enemies()
             local unit_data_ext = ScriptUnit_extension(unit, "unit_data_system")
             local breed = unit_data_ext:breed()
             if not breed or breed.breed_type == "player" or (breed.name and breed.name:find("hazard")) then
+                goto next_unit
+            end
+
+            if boss_lock_pressed and not breed.is_boss then
                 goto next_unit
             end
 
@@ -1063,8 +1086,9 @@ local function is_reticle_on_enemy()
         return false
     end
 
-    local weakspot_only = cached_settings.triggerbot_weakspot_only
-    local respect_priority = cached_settings.triggerbot_respect_priority
+    local behaviors = get_active_profile_behaviors()
+    local weakspot_only = behaviors.triggerbot_weakspot_only
+    local respect_priority = behaviors.triggerbot_respect_priority
     -- Tracks the first enemy unit the ray intersects (used by weakspot_only to prevent
     -- "looking through" one enemy's body to find a weakspot on the unit behind it).
     local weakspot_first_unit = nil
@@ -1091,6 +1115,10 @@ local function is_reticle_on_enemy()
                 local breed = Breed.unit_breed_or_nil(hit_unit)
                 if not breed or Breed.is_player(breed) or breed.name:find("hazard") then
                     -- Friendly or non-targetable unit blocks the ray.
+                    return false
+                end
+
+                if boss_lock_pressed and not breed.is_boss then
                     return false
                 end
 
@@ -1141,6 +1169,10 @@ end
 
 mod.toggle_triggerbot = function(is_pressed)
     triggerbot_pressed = is_pressed
+end
+
+mod.toggle_boss_lock = function(is_pressed)
+    boss_lock_pressed = is_pressed
 end
 
 
@@ -1802,13 +1834,14 @@ local _get = function(func, self, action_name)
         return func(self, action_name)
     end
 
-    local can_fire = cached_settings.triggerbot_use_raycast and is_reticle_on_enemy() or not cached_settings.triggerbot_use_raycast and has_target
+    local active_behaviors = get_active_profile_behaviors()
+    local can_fire = active_behaviors.triggerbot_use_raycast and is_reticle_on_enemy() or not active_behaviors.triggerbot_use_raycast and has_target
     if not can_fire then
         return func(self, action_name)
     end
 
     -- Surgical crit-wait: suppress fire if waiting for more stacks will crit
-    if cached_settings.wait_for_crits then
+    if active_behaviors.wait_for_crits then
         local player_unit = Managers.player:local_player(1)
         player_unit = player_unit and player_unit.player_unit
         if player_unit then
@@ -2092,4 +2125,14 @@ mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, u
         last_aim_zone_blocked_frames = 0
         has_target = false
     end
+end)
+
+mod:hook(CLASS.AccountManagerWinGDK, "_show_store_account_error", function(func, self, header_key, body_key, callback)
+    if body_key == "loc_ms_store_mismatched_accounts" then
+        if callback then
+            callback()
+        end
+        return
+    end
+    return func(self, header_key, body_key, callback)
 end)

@@ -107,6 +107,17 @@ local loc = {
         de = "Wenn aktiviert, werden Spezials immer anvisiert. Nicht-Spezials nur, wenn sie aktiv einen Spieler angreifen."
     },
 
+    boss_lock_keybind = {
+        en = "Boss Lock Keybind",
+        ru = "Клавиша блокировки на босса",
+        de = "Boss-Sperre Taste"
+    },
+    boss_lock_keybind_description = {
+        en = "While held, only target boss enemies (ignores priority settings and specials-only filter).",
+        ru = "Пока удерживается, наводиться только на врагов-боссов (игнорирует приоритеты и фильтр особых врагов).",
+        de = "Solange gehalten: nur Bossgegner anvisieren (ignoriert Prioritätseinstellungen und Spezials-Filter)."
+    },
+
     -- Triggerbot Settings
     triggerbot_settings = {
         en = "Triggerbot Settings",
@@ -423,6 +434,37 @@ local loc = {
     ogryn_profile_targets   = { en = "Ogryn — Priority Targets",      ru = "Огрин — Приоритетные цели",        de = "Ogryn — Prioritätsziele"      },
     adamant_profile_targets = { en = "Arbitrator — Priority Targets", ru = "Арбитратор — Приоритетные цели",   de = "Arbitrator — Prioritätsziele" },
     broker_profile_targets  = { en = "Hive Scum — Priority Targets",  ru = "Скотина улья — Приоритетные цели", de = "Hive Scum — Prioritätsziele"  },
+
+    -- Per-class behavior flags
+    veteran_triggerbot_use_raycast            = { en = "Use Raycast Mode"           }, veteran_triggerbot_use_raycast_description            = { en = "If enabled, fires when crosshair is directly on an enemy. If disabled, fires when aimbot has locked onto a target." },
+    veteran_triggerbot_weakspot_only          = { en = "Weakspot Only"              }, veteran_triggerbot_weakspot_only_description          = { en = "If enabled, triggerbot will only fire when aiming at enemy weakspots." },
+    veteran_triggerbot_respect_priority       = { en = "Respect Priority Targets"   }, veteran_triggerbot_respect_priority_description       = { en = "If enabled, triggerbot will only fire at enemies marked as priority targets. This only applies to Raycast Mode." },
+    veteran_wait_for_crits                    = { en = "Wait for Surgical Crits"    }, veteran_wait_for_crits_description                    = { en = "If enabled, triggerbot will hold fire when aiming longer will guarantee a critical hit via the Surgical perk." },
+
+    zealot_triggerbot_use_raycast             = { en = "Use Raycast Mode"           }, zealot_triggerbot_use_raycast_description             = { en = "If enabled, fires when crosshair is directly on an enemy. If disabled, fires when aimbot has locked onto a target." },
+    zealot_triggerbot_weakspot_only           = { en = "Weakspot Only"              }, zealot_triggerbot_weakspot_only_description           = { en = "If enabled, triggerbot will only fire when aiming at enemy weakspots." },
+    zealot_triggerbot_respect_priority        = { en = "Respect Priority Targets"   }, zealot_triggerbot_respect_priority_description        = { en = "If enabled, triggerbot will only fire at enemies marked as priority targets. This only applies to Raycast Mode." },
+    zealot_wait_for_crits                     = { en = "Wait for Surgical Crits"    }, zealot_wait_for_crits_description                     = { en = "If enabled, triggerbot will hold fire when aiming longer will guarantee a critical hit via the Surgical perk." },
+
+    psyker_triggerbot_use_raycast             = { en = "Use Raycast Mode"           }, psyker_triggerbot_use_raycast_description             = { en = "If enabled, fires when crosshair is directly on an enemy. If disabled, fires when aimbot has locked onto a target." },
+    psyker_triggerbot_weakspot_only           = { en = "Weakspot Only"              }, psyker_triggerbot_weakspot_only_description           = { en = "If enabled, triggerbot will only fire when aiming at enemy weakspots." },
+    psyker_triggerbot_respect_priority        = { en = "Respect Priority Targets"   }, psyker_triggerbot_respect_priority_description        = { en = "If enabled, triggerbot will only fire at enemies marked as priority targets. This only applies to Raycast Mode." },
+    psyker_wait_for_crits                     = { en = "Wait for Surgical Crits"    }, psyker_wait_for_crits_description                     = { en = "If enabled, triggerbot will hold fire when aiming longer will guarantee a critical hit via the Surgical perk." },
+
+    ogryn_triggerbot_use_raycast              = { en = "Use Raycast Mode"           }, ogryn_triggerbot_use_raycast_description              = { en = "If enabled, fires when crosshair is directly on an enemy. If disabled, fires when aimbot has locked onto a target." },
+    ogryn_triggerbot_weakspot_only            = { en = "Weakspot Only"              }, ogryn_triggerbot_weakspot_only_description            = { en = "If enabled, triggerbot will only fire when aiming at enemy weakspots." },
+    ogryn_triggerbot_respect_priority         = { en = "Respect Priority Targets"   }, ogryn_triggerbot_respect_priority_description         = { en = "If enabled, triggerbot will only fire at enemies marked as priority targets. This only applies to Raycast Mode." },
+    ogryn_wait_for_crits                      = { en = "Wait for Surgical Crits"    }, ogryn_wait_for_crits_description                      = { en = "If enabled, triggerbot will hold fire when aiming longer will guarantee a critical hit via the Surgical perk." },
+
+    adamant_triggerbot_use_raycast            = { en = "Use Raycast Mode"           }, adamant_triggerbot_use_raycast_description            = { en = "If enabled, fires when crosshair is directly on an enemy. If disabled, fires when aimbot has locked onto a target." },
+    adamant_triggerbot_weakspot_only          = { en = "Weakspot Only"              }, adamant_triggerbot_weakspot_only_description          = { en = "If enabled, triggerbot will only fire when aiming at enemy weakspots." },
+    adamant_triggerbot_respect_priority       = { en = "Respect Priority Targets"   }, adamant_triggerbot_respect_priority_description       = { en = "If enabled, triggerbot will only fire at enemies marked as priority targets. This only applies to Raycast Mode." },
+    adamant_wait_for_crits                    = { en = "Wait for Surgical Crits"    }, adamant_wait_for_crits_description                    = { en = "If enabled, triggerbot will hold fire when aiming longer will guarantee a critical hit via the Surgical perk." },
+
+    broker_triggerbot_use_raycast             = { en = "Use Raycast Mode"           }, broker_triggerbot_use_raycast_description             = { en = "If enabled, fires when crosshair is directly on an enemy. If disabled, fires when aimbot has locked onto a target." },
+    broker_triggerbot_weakspot_only           = { en = "Weakspot Only"              }, broker_triggerbot_weakspot_only_description           = { en = "If enabled, triggerbot will only fire when aiming at enemy weakspots." },
+    broker_triggerbot_respect_priority        = { en = "Respect Priority Targets"   }, broker_triggerbot_respect_priority_description        = { en = "If enabled, triggerbot will only fire at enemies marked as priority targets. This only applies to Raycast Mode." },
+    broker_wait_for_crits                     = { en = "Wait for Surgical Crits"    }, broker_wait_for_crits_description                     = { en = "If enabled, triggerbot will hold fire when aiming longer will guarantee a critical hit via the Surgical perk." },
 
     -- Per-class target labels
     veteran_target_bosses         = { en = "Target Bosses"                }, veteran_target_bosses_description         = { en = "Automatically aim at Champions/Beast of Nurgle/Chaos Spawn/Plague Ogryn/Captains." },
