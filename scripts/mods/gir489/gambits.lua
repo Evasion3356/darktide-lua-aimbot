@@ -625,6 +625,7 @@ local function predict_crit_wait(player_unit)
             local crit_key = BuffSettings.stat_buffs.critical_strike_chance
             local ctx_override = buff._template_context and buff._template_context.template_override_data
             chance_per_step = (ctx_override and ctx_override.conditional_stat_buffs and ctx_override.conditional_stat_buffs[crit_key])
+                           or (ctx_override and ctx_override.stat_buffs and ctx_override.stat_buffs[crit_key])
                            or (tmpl.conditional_stat_buffs and tmpl.conditional_stat_buffs[crit_key])
                            or SURGICAL_CHANCE_PER_STEP_FALLBACK
             -- Max visual steps: call min_max_step_func if present.
