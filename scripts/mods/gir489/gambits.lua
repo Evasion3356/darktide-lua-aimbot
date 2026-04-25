@@ -14,6 +14,7 @@ local DamageCalculation = require("scripts/utilities/attack/damage_calculation")
 local PowerLevelSettings = require("scripts/settings/damage/power_level_settings")
 local PlayerUnitStatus = require("scripts/utilities/attack/player_unit_status")
 local BuffSettings = require("scripts/settings/buff/buff_settings")
+local Action = require("scripts/utilities/action/action")
 local AttackSettings = require("scripts/settings/damage/attack_settings")
 local melee_attack_strengths = AttackSettings.melee_attack_strength
 
@@ -2002,7 +2003,32 @@ mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, u
     _last_melee_equipped = melee_equipped
 
     if cached_settings.enable_auto_guard or melee_mode_active then
-        auto_guard_blocking = check_power_attack_incoming(unit)
+        -- Don't guard while charging a heavy attack: interrupting a windup with a block
+        -- cancels the swing and wastes the charge.  Check both the mod's own heavy-phase
+        -- state machine (melee_heavy_phase == 1) and the game's reported action kind so
+        -- that manually-charged heavies are also covered.
+        local suppress_for_charge = melee_heavy_phase == 1
+        if not suppress_for_charge then
+            local unit_data_ext = ScriptUnit_has_extension(unit, "unit_data_system")
+            local wac = unit_data_ext and unit_data_ext:read_component("weapon_action")
+            if wac then
+                local wt = WeaponTemplate.current_weapon_template(wac)
+                local _, action_settings = Action.current_action(wac, wt)
+                suppress_for_charge = action_settings ~= nil and action_settings.kind == "windup"
+            end
+        end
+        -- Don't guard while in shroudfield: raising a block immediately breaks the
+        -- invisibility keyword and reveals the player.
+        local suppress_for_stealth = false
+        if not suppress_for_charge then
+            local buff_ext = ScriptUnit_has_extension(unit, "buff_system")
+            suppress_for_stealth = buff_ext ~= nil and buff_ext:has_keyword(BuffSettings.keywords.invisible)
+        end
+        if suppress_for_charge or suppress_for_stealth then
+            auto_guard_blocking = false
+        else
+            auto_guard_blocking = check_power_attack_incoming(unit)
+        end
     else
         auto_guard_blocking = false
     end
