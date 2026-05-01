@@ -11,12 +11,18 @@ local CriticalStrike = require("scripts/utilities/attack/critical_strike")
 local Dodge = require("scripts/extension_systems/character_state_machine/character_states/utilities/dodge")
 local DamageProfile = require("scripts/utilities/attack/damage_profile")
 local DamageCalculation = require("scripts/utilities/attack/damage_calculation")
+local PowerLevel = require("scripts/utilities/attack/power_level")
 local PowerLevelSettings = require("scripts/settings/damage/power_level_settings")
 local PlayerUnitStatus = require("scripts/utilities/attack/player_unit_status")
 local BuffSettings = require("scripts/settings/buff/buff_settings")
 local Action = require("scripts/utilities/action/action")
 local AttackSettings = require("scripts/settings/damage/attack_settings")
+local DamageSettings = require("scripts/settings/damage/damage_settings")
+local ArmorSettings = require("scripts/settings/damage/armor_settings")
+local TalentSettings = require("scripts/settings/talent/talent_settings")
+local SpecialRulesSettings = require("scripts/settings/ability/special_rules_settings")
 local melee_attack_strengths = AttackSettings.melee_attack_strength
+local attack_types = AttackSettings.attack_types
 
 local HALF_PI = math.pi / 2
 
@@ -36,6 +42,17 @@ local ZONE_GRACE_FRAMES = 10
 -- Set true to log melee heavy/light decision diagnostics; flip false to silence.
 local MELEE_DEBUG = false
 local _melee_debug_last_unit = nil
+
+-- Set true to log surgical crit-wait damage estimates and server-side actuals.
+local SURGICAL_DEBUG = false
+local _surgical_debug_last_unit = nil
+local _surgical_debug_last_stacks = nil
+-- Snapshot of last_aim_unit taken at the moment the player fires, so the
+-- server-side hook can match the hit even if last_aim_unit changes before
+-- a projectile arrives (travel time weapons like plasma).
+local _surgical_debug_fired_unit      = nil
+local _surgical_debug_fired_time      = nil
+local SURGICAL_DEBUG_MISS_TIMEOUT     = 2.0  -- seconds; clears unit if no hit arrives (miss/wall)
 
 local BREED_PRIORITY_MAP = {
     -- Hound
@@ -489,29 +506,65 @@ local SURGICAL_CHANCE_PER_STEP_FALLBACK = 0.05
 -- On the first call we probe with pcall; if it succeeds we replace ourselves
 -- with a zero-overhead direct call; if it fails we fall back to always-false
 -- (safe: predict_crit_wait will fire immediately rather than waiting).
+--
+-- prd_flip returns all three values (result, new_state, new_seed) so callers
+-- can chain multiple PRD checks (e.g. Leadbelcher lucky-strike then crit).
 local prd_would_crit
+local prd_flip          -- like prd_would_crit but returns (result, new_state, new_seed)
+local _prd_available = false
+
 local function _prd_direct(chance, state, seed)
     return (CriticalStrike.is_critical_strike(chance, state, seed))
 end
+local function _prd_flip_direct(chance, state, seed)
+    return CriticalStrike.is_critical_strike(chance, state, seed)
+end
 local function _prd_fallback()
     return false
+end
+local function _prd_flip_fallback(chance, state, seed)
+    return false, state, seed
 end
 local function _prd_probe(chance, state, seed)
     local ok, result = pcall(CriticalStrike.is_critical_strike, chance, state, seed)
     if ok then
         prd_would_crit = _prd_direct
+        prd_flip       = _prd_flip_direct
+        _prd_available = true
         return result
     end
     prd_would_crit = _prd_fallback
+    prd_flip       = _prd_flip_fallback
     return false
 end
+local function _prd_flip_probe(chance, state, seed)
+    local ok, r, ns, nse = pcall(CriticalStrike.is_critical_strike, chance, state, seed)
+    if ok then
+        prd_would_crit = _prd_direct
+        prd_flip       = _prd_flip_direct
+        _prd_available = true
+        return r, ns, nse
+    end
+    prd_would_crit = _prd_fallback
+    prd_flip       = _prd_flip_fallback
+    return false, state, seed
+end
 prd_would_crit = _prd_probe
+prd_flip       = _prd_flip_probe
 
 
--- Estimates normal damage per hit against target_unit using
--- the current weapon's damage profile and the target's armor type.
--- Returns nil when the required data is unavailable.
-local function _estimate_shot_damage(player_unit, target_unit)
+-- Maps armor_type string to the corresponding attacker stat_buff key used by
+-- _apply_armor_type_buffs_to_damage in the engine damage path.
+local _ARMOR_STAT_BUFF_KEY = {
+    unarmored                 = "unarmored_damage",
+    armored                   = "armored_damage",
+    resistant                 = "resistant_damage",
+    berserker                 = "berserker_damage",
+    super_armor               = "super_armor_damage",
+    disgustingly_resilient    = "disgustingly_resilient_damage",
+}
+
+local function _estimate_shot_damage(player_unit, target_unit, hit_weakspot)
     local unit_data_ext = ScriptUnit_extension(player_unit, "unit_data_system")
     if not unit_data_ext then return nil end
 
@@ -542,17 +595,186 @@ local function _estimate_shot_damage(player_unit, target_unit)
     local target_settings = damage_profile.targets[1] or damage_profile.targets.default_target
     if not target_settings then return nil end
 
-    local lerp_values = DamageProfile.lerp_values(damage_profile, player_unit)
+    -- Get quality-based lerp values for the SHOOT action, not the running action.
+    -- DamageProfile.lerp_values uses the currently-running action; during ADS-hold
+    -- (action_zoom) that action has no damage lerp entries, so quality-based values
+    -- (power_distribution, ADM, etc.) fall back to DEFALT_FALLBACK_LERP_VALUE=0.5.
+    -- We bypass this by reading the shoot action's slot directly from the weapon table.
+    local shoot_action_name = actions.action_shoot_zoomed and "action_shoot_zoomed" or "action_shoot_hip"
+    local lerp_values
+    do
+        local w_ext = ScriptUnit_has_extension(player_unit, "weapon_system")
+        if w_ext then
+            local ok, raw = pcall(function()
+                local w = w_ext:_wielded_weapon(w_ext._inventory_component, w_ext._weapons)
+                if not w or not w.damage_profile_lerp_values then return nil end
+                local al = w.damage_profile_lerp_values[shoot_action_name]
+                if not al then return nil end
+                return damage_profile.name and al[damage_profile.name] or al
+            end)
+            if ok and raw then
+                raw.current_target_settings_lerp_values = raw.current_target_settings_lerp_values or {}
+                lerp_values = raw
+            end
+        end
+        if not lerp_values then
+            lerp_values = DamageProfile.lerp_values(damage_profile, player_unit)
+        end
+    end
 
-    local base_dmg = DamageCalculation.base_ui_damage(
-        damage_profile, target_settings, power_level, nil, nil, lerp_values)
+    -- Pull the player's active stat buffs first — needed for correct power-level scaling.
+    local buff_ext   = ScriptUnit_extension(player_unit, "buff_system")
+    local stat_buffs = buff_ext and buff_ext:stat_buffs() or {}
+
+    -- Pull target stat buffs for weakspot_damage_taken.
+    local target_buff_ext   = ScriptUnit_extension(target_unit, "buff_system")
+    local target_stat_buffs = target_buff_ext and target_buff_ext:stat_buffs() or {}
+
+    -- Distance for dropoff and damage-near/far buffs.
+    local player_pos = Unit_world_position(player_unit, 1)
+    local target_pos = Unit_world_position(target_unit, 1)
+    local distance   = Vector3_length(target_pos - player_pos)
+
+    -- Compute base damage using the weapon's power_distribution_ranged (near/far).
+    -- DamageProfile.dropoff_scalar uses damage_profile.ranges (not DamageSettings thresholds).
+    local dropoff_scalar = DamageProfile.dropoff_scalar(distance, damage_profile, lerp_values)
+    local scaled_pl   = PowerLevel.scale_by_charge_level(power_level, nil, damage_profile.charge_level_scaler)
+    -- DamageCalculation.calculate multiplies power_level by target_settings.power_level_multiplier
+    -- before calling _power_level_scaled_damage (lines 51-56 in damage_calculation.lua).
+    local pl_mult = 1
+    if target_settings.power_level_multiplier then
+        local pl_lerp_value = DamageProfile.lerp_value_from_path(lerp_values, "targets", 1, "power_level_multiplier")
+        pl_mult = DamageProfile.lerp_damage_profile_entry(target_settings.power_level_multiplier, pl_lerp_value)
+        scaled_pl = scaled_pl * pl_mult
+    end
+    local attack_pl   = DamageProfile.power_distribution_from_power_level(
+        scaled_pl, "attack", damage_profile, target_settings, false, dropoff_scalar, armor_type, lerp_values,
+        stat_buffs, attack_types.ranged, hit_weakspot, player_unit, target_unit)
+    local dmg_table   = PowerLevelSettings.damage_output[armor_type] or PowerLevelSettings.damage_output.unarmored
+    local base_dmg    = dmg_table.min + (dmg_table.max - dmg_table.min) * PowerLevel.power_level_percentage(attack_pl)
     if not base_dmg or base_dmg <= 0 then return nil end
 
+    -- ── damage_stat_buffs (mirrors _calculate_damage_buff, additive) ──────────
+    local dmg_mult = stat_buffs.damage or 1
+
+    dmg_mult = dmg_mult + (stat_buffs.ranged_damage or 1) - 1
+
+    -- Per-breed specific buff ("damage_vs_chaos_ogryn_executor" etc.).
+    if breed then
+        local bkey = "damage_vs_" .. breed.name
+        dmg_mult = dmg_mult + (stat_buffs[bkey] or 1) - 1
+    end
+
+    -- Breed-tag-based buffs.
+    local tags = breed and breed.tags or {}
+    if tags.ogryn   then dmg_mult = dmg_mult + (stat_buffs.damage_vs_ogryn               or 1) - 1 end
+    if tags.ogryn or tags.monster then
+                         dmg_mult = dmg_mult + (stat_buffs.damage_vs_ogryn_and_monsters   or 1) - 1 end
+    if tags.monster then dmg_mult = dmg_mult + (stat_buffs.damage_vs_monsters             or 1) - 1 end
+    if tags.elite   then dmg_mult = dmg_mult + (stat_buffs.damage_vs_elites               or 1) - 1 end
+    if tags.special then dmg_mult = dmg_mult + (stat_buffs.damage_vs_specials             or 1) - 1 end
+    if tags.horde   then dmg_mult = dmg_mult + (stat_buffs.damage_vs_horde                or 1) - 1 end
+
+    -- Distance-based damage_near/far buffs use DamageSettings thresholds.
+    local close_range = DamageSettings.ranged_close
+    local far_range   = DamageSettings.ranged_far
+    local close_buff  = stat_buffs.damage_near or 1
+    local far_buff    = stat_buffs.damage_far  or 1
+    local rfar_buff   = stat_buffs.ranged_damage_far or 1
+    local dist_scalar = math.clamp((distance - close_range) / (far_range - close_range), 0, 1)
+    dmg_mult = dmg_mult + math.lerp(close_buff, far_buff + rfar_buff - 1, math.sqrt(dist_scalar)) - 1
+
+    -- ── Armor-type multiplier (applied after ADM+finesse+zone) ───────────────
+    local armor_key  = _ARMOR_STAT_BUFF_KEY[armor_type]
+    local armor_mult = armor_key and (stat_buffs[armor_key] or 1) or 1
+
+    -- ── ADM + rending ─────────────────────────────────────────────────────────
+    -- Raw ADM from the damage profile (before rending).
     local adm_normal = DamageProfile.armor_damage_modifier(
         "attack", damage_profile, target_settings, lerp_values,
         armor_type, false, nil, false, 0)
+    local adm_crit = DamageProfile.armor_damage_modifier(
+        "attack", damage_profile, target_settings, lerp_values,
+        armor_type, true, nil, false, 0)
 
-    return base_dmg * adm_normal
+    -- Rending pushes the effective ADM up before finesse is applied.
+    -- _rending_multiplier sums 17 components (all default 1) and subtracts 17;
+    -- for a plain ranged shot only attacker/target rending and ranged_rending are non-unity.
+    local base_rending = (stat_buffs.rending_multiplier         or 1)
+                       + (target_stat_buffs.rending_multiplier  or 1)
+                       + (stat_buffs.ranged_rending_multiplier  or 1)
+                       - 3
+    base_rending = math.min(base_rending, 1)
+    local rending_armor_mult = ArmorSettings.rending_armor_type_multiplier[armor_type] or 0
+    local rending            = base_rending * rending_armor_mult
+    local overdmg_mult       = ArmorSettings.overdamage_rending_multiplier[armor_type] or 0
+
+    local function _rend(raw_adm)
+        local adm_lost = math.max(1 - raw_adm, 0)
+        if raw_adm >= 1 then
+            return raw_adm + rending * overdmg_mult
+        elseif adm_lost < rending then
+            return 1 + (rending - adm_lost) * overdmg_mult
+        else
+            return raw_adm + rending
+        end
+    end
+
+    local rended_adm_normal = _rend(adm_normal)
+    local rended_adm_crit   = _rend(adm_crit)
+
+    -- ── Finesse (mirrors _finesse_boost_damage in damage_calculation.lua) ────
+    -- ui_finesse_multiplier returns (1 + raw_boost) where raw_boost =
+    -- boost_curve_frac * default_boost_curve_multiplier.  The actual damage
+    -- multiplies raw_boost by finesse_buff_damage_multiplier assembled below.
+    local boost_normal = (DamageCalculation.ui_finesse_multiplier(
+        damage_profile, target_settings, armor_type, hit_weakspot, false, lerp_values) or 1) - 1
+    local boost_crit = (DamageCalculation.ui_finesse_multiplier(
+        damage_profile, target_settings, armor_type, hit_weakspot, true, lerp_values) or 1) - 1
+
+    -- weakspot_damage_stat_buff (only when hit_weakspot).
+    local weakspot_stat = 1
+    if hit_weakspot then
+        weakspot_stat = (target_stat_buffs.weakspot_damage_taken or 1)
+            + (stat_buffs.weakspot_damage        or 1) - 1
+            + (stat_buffs.ranged_weakspot_damage or 1) - 1
+    end
+
+    -- critical_damage_stat_buff: csd + rcsd + melee - 2 (melee defaults to 1 for ranged).
+    local crit_dmg_stat = (stat_buffs.critical_strike_damage       or 1)
+                        + (stat_buffs.ranged_critical_strike_damage or 1)
+                        + 1 - 2
+
+    -- crit_weakspot only applies when crit AND hit_weakspot.
+    local crit_ws_stat = hit_weakspot and (stat_buffs.critical_strike_weakspot_damage or 1) or 1
+
+    -- Optional bonuses (default 1 → zero net contribution each).
+    local finesse_mod_bonus  = stat_buffs.finesse_modifier_bonus         or 1
+    local ranged_fb_bonus    = stat_buffs.ranged_finesse_modifier_bonus  or 1
+    -- close_range finesse bonus (uses DamageSettings threshold, same as the source).
+    local close_fb = 1
+    if distance < DamageSettings.ranged_close then
+        close_fb = stat_buffs.finesse_close_range_modifier or 1
+    end
+
+    -- Assemble finesse_buff_damage_multiplier from source lines 758-761:
+    --   fbm = ws + (crit_dmg + crit_ws + finesse_mod - 3) + (melee_fb(1) + ranged_fb + close_fb - 3)
+    -- With all defaults = 1: fbm_normal = ws; fbm_crit = ws + crit_dmg + crit_ws - 2
+    local fbm_normal = weakspot_stat
+        + 1 + 1 + finesse_mod_bonus - 3          -- non-crit: crit_dmg=1, crit_ws=1
+        + 1 + ranged_fb_bonus + close_fb - 3     -- melee_fb=1 (ranged)
+    local fbm_crit   = weakspot_stat
+        + crit_dmg_stat + crit_ws_stat + finesse_mod_bonus - 3
+        + 1 + ranged_fb_bonus + close_fb - 3
+
+    local finesse_normal = 1 + boost_normal * fbm_normal
+    local finesse_crit   = 1 + boost_crit   * fbm_crit
+
+    local normal_dmg = base_dmg * rended_adm_normal * dmg_mult * armor_mult * finesse_normal
+    local crit_dmg   = base_dmg * rended_adm_crit   * dmg_mult * armor_mult * finesse_crit
+
+
+    return normal_dmg, crit_dmg
 end
 
 -- Predicts whether the next shot will crit, and if not, whether waiting for
@@ -598,8 +820,52 @@ local function predict_crit_wait(player_unit)
     local current_chance = CriticalStrike.chance(player, weapon_handling_template, true, false, false)
     local rounded = math.round_with_precision(current_chance, 2)
 
+    -- action_shoot.lua calls _check_for_lucky_strike BEFORE _check_for_critical_strike.
+    -- Lucky strike always advances component.seed, so the actual crit check sees a seed
+    -- 1-2 steps ahead of what we just read.  Simulate the same advance(s) here.
+    local talent_ext = ScriptUnit_has_extension(player_unit, "talent_system")
+    if talent_ext and _prd_available then
+        local sr = SpecialRulesSettings.special_rules
+        local has_lb     = talent_ext:has_special_rule(sr.ogryn_leadbelcher)
+        local has_lb_imp = talent_ext:has_special_rule(sr.ogryn_leadbelcher_improved)
+        if has_lb or has_lb_imp then
+            local lb_base = has_lb
+                and TalentSettings.ogryn_1.passive_1.free_ammo_proc_chance
+                or  TalentSettings.ogryn_1.spec_passive_2.increased_passive_proc_chance
+            local sb_lb     = buff_ext:stat_buffs()
+            local lb_chance = lb_base + (sb_lb.leadbelcher_chance_bonus or 0)
+            if buff_ext:has_keyword("guaranteed_leadbelcher") then lb_chance = 1 end
+            local lb_rounded = math.round_with_precision(lb_chance, 2)
+            -- For a fresh auto-fire action start(), the game runs LB twice before
+            -- the crit check (once in start(), once in _check_for_auto_critical_strike).
+            -- For semi-auto or a continuing auto action only 1 LB precedes the crit check.
+            local fire_rate  = weapon_handling_template.fire_rate_settings or {}
+            local is_auto    = fire_rate.auto_fire_time ~= nil and (fire_rate.max_shots == nil or fire_rate.max_shots == math.huge)
+            local action_comp = unit_data_ext:read_component("weapon_action")
+            local action_running = action_comp and action_comp.current_action_name == "action_one_hold"
+            local lb_advances = (is_auto and not action_running) and 2 or 1
+            local last_is_lucky = false
+            for _ = 1, lb_advances do
+                local is_lucky, lb_new_state, lb_new_seed = prd_flip(lb_rounded, prd_state, seed)
+                seed = lb_new_seed
+                if is_lucky then prd_state = lb_new_state end
+                last_is_lucky = is_lucky
+            end
+            -- If the next shot will be a Lucky Bullet and the player has the
+            -- auto-crit perk (ogryn_leadbelcher_auto_crit), it guarantees a crit —
+            -- no need to hold for Surgical stacks.
+            if last_is_lucky and talent_ext:has_special_rule(sr.ogryn_leadbelcher_auto_crit) then
+                if SURGICAL_DEBUG then
+                    mod:info("[surgical_prd] lucky_bullet_auto_crit → early fire")
+                end
+                return "fire"
+            end
+        end
+    end
+
     -- Check if the next shot already crits at current chance
-    if prd_would_crit(rounded, prd_state, seed) then
+    local crits_now = prd_would_crit(rounded, prd_state, seed)
+    if crits_now then
         return "fire"
     end
 
@@ -645,16 +911,42 @@ local function predict_crit_wait(player_unit)
     -- Simulate each additional stack to see if any produces a crit
     for extra = 1, max_steps - current_stacks do
         local test_chance = math.clamp(current_chance + extra * chance_per_step, 0, 1)
-        if prd_would_crit(math.round_with_precision(test_chance, 2), prd_state, seed) then
+        local rounded_test = math.round_with_precision(test_chance, 2)
+        local would_crit = prd_would_crit(rounded_test, prd_state, seed)
+        if would_crit then
             -- Need extra more stacks; check if waiting is damage-efficient
             if last_aim_unit then
                 local health_ext = ScriptUnit_has_extension(last_aim_unit, "health_system")
                 if health_ext and health_ext:is_alive() then
                     local hp = health_ext:current_health()
-                    local n_dmg = _estimate_shot_damage(player_unit, last_aim_unit)
+                    local n_dmg, c_dmg = _estimate_shot_damage(player_unit, last_aim_unit, true)
                     if n_dmg and n_dmg > 0 then
                         local breed = Breed.unit_breed_or_nil(last_aim_unit)
                         local armor_type = breed and breed.armor_type
+                        if SURGICAL_DEBUG then
+                            if last_aim_unit ~= _surgical_debug_last_unit or current_stacks ~= _surgical_debug_last_stacks then
+                                _surgical_debug_last_unit   = last_aim_unit
+                                _surgical_debug_last_stacks = current_stacks
+                                local buff_ext2  = ScriptUnit_extension(player_unit, "buff_system")
+                                local sb         = buff_ext2 and buff_ext2:stat_buffs() or {}
+                                local armor_key2 = _ARMOR_STAT_BUFF_KEY[armor_type]
+                                local ppos = Unit_world_position(player_unit, 1)
+                                local tpos = Unit_world_position(last_aim_unit, 1)
+                                local dist2 = Vector3_length(tpos - ppos)
+                                mod:info("[surgical_dbg] target=%s armor=%s  base=%.3f  crit=%.3f  hp=%.1f  stacks=%d/%d  cur_chance=%.3f  extra_needed=%d  dist=%.1f",
+                                    breed and breed.name or "nil", tostring(armor_type),
+                                    n_dmg, c_dmg or 0, hp, current_stacks, max_steps, current_chance, extra, dist2)
+                                local parts = {}
+                                for k, v in pairs(sb) do
+                                    local vn = tonumber(v)
+                                    if vn and vn ~= 1 and vn ~= 0 then
+                                        parts[#parts + 1] = k .. "=" .. string.format("%.4f", vn)
+                                    end
+                                end
+                                table.sort(parts)
+                                mod:info("[surgical_dbg] buffs(%d): %s", #parts, table.concat(parts, "  "))
+                            end
+                        end
                         -- For carapace (super_armor, base ADM=0→crit floors at 0.25) and flak
                         -- (armored, base ADM=0.5, crit adds finesse ~1.5x), crits are valuable
                         -- enough that we only skip the wait if a single normal shot already kills.
@@ -1856,6 +2148,10 @@ local _get = function(func, self, action_name)
 
     local weapon_template, fire_mode = get_current_weapon_info()
     if action_name == "action_one_hold" and (fire_mode == "charge" or fire_mode == "full_auto") then
+        if SURGICAL_DEBUG then
+            _surgical_debug_fired_unit = last_aim_unit
+            _surgical_debug_fired_time = Managers.time and Managers.time:time("main")
+        end
         return true
     end
 
@@ -1864,6 +2160,10 @@ local _get = function(func, self, action_name)
         local fire_interval, current_time = get_fire_interval()
         if current_time - last_semi_auto_fire_time >= fire_interval then
             last_semi_auto_fire_time = current_time
+            if SURGICAL_DEBUG then
+                _surgical_debug_fired_unit = last_aim_unit
+                _surgical_debug_fired_time = Managers.time and Managers.time:time("main")
+            end
             return true
         end
         return false
@@ -2153,6 +2453,41 @@ mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, u
         has_target = false
     end
 end)
+
+-- DamageCalculation is a plain require'd table, not a registered class, so
+-- mod:hook won't find it by string name. Monkey-patch directly instead.
+-- Uses _surgical_debug_fired_unit (snapshotted at fire time) so projectile-
+-- travel weapons (plasma, bolter, etc.) still match after last_aim_unit moves on.
+do
+    -- Persist the true original across mod reloads: the first load stores it on
+    -- the table; subsequent reloads find it there instead of capturing the wrapper.
+    DamageCalculation._gambits_orig_calculate = DamageCalculation._gambits_orig_calculate or DamageCalculation.calculate
+    DamageCalculation.calculate = function(...)
+        local r1, r2, r3, r4, r5, r6, r7, r8, r9, r10 = DamageCalculation._gambits_orig_calculate(...)
+        if SURGICAL_DEBUG and _surgical_debug_fired_unit then
+            -- Auto-clear on miss: if the shot never hit within the timeout window, discard.
+            local now = Managers.time and Managers.time:time("main")
+            if now and _surgical_debug_fired_time and (now - _surgical_debug_fired_time) > SURGICAL_DEBUG_MISS_TIMEOUT then
+                _surgical_debug_fired_unit = nil
+                _surgical_debug_fired_time = nil
+            end
+            local target_unit        = select(30, ...)
+            local is_critical_strike = select(11, ...)
+            if target_unit == _surgical_debug_fired_unit then
+                -- r3=base_damage (raw), r4=base_buff_damage (stat buff portion),
+                -- so damage_stat_buffs = (r3+r4)/r3
+                local charge_level_srv = select(7, ...)
+                mod:info("[surgical_srv] crit=%s  charge=%.4f  total=%.3f  base=%.3f  base_buff=%.3f  finesse=%.3f  adm=%.3f  zone_mult=%.3f  dmg_mult=%.4f",
+                    tostring(is_critical_strike), charge_level_srv or 0,
+                    r1 or 0, r3 or 0, r4 or 0, r6 or 0, r9 or 0, r10 or 0,
+                    (r3 and r3 > 0) and ((r3 + (r4 or 0)) / r3) or 0)
+                _surgical_debug_fired_unit = nil
+                _surgical_debug_fired_time = nil
+            end
+        end
+        return r1, r2, r3, r4, r5, r6, r7, r8, r9, r10
+    end
+end
 
 mod:hook(CLASS.AccountManagerWinGDK, "_show_store_account_error", function(func, self, header_key, body_key, callback)
     if body_key == "loc_ms_store_mismatched_accounts" then
