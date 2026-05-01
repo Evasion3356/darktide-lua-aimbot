@@ -43,17 +43,6 @@ local ZONE_GRACE_FRAMES = 10
 local MELEE_DEBUG = false
 local _melee_debug_last_unit = nil
 
--- Set true to log surgical crit-wait damage estimates and server-side actuals.
-local SURGICAL_DEBUG = false
-local _surgical_debug_last_unit = nil
-local _surgical_debug_last_stacks = nil
--- Snapshot of last_aim_unit taken at the moment the player fires, so the
--- server-side hook can match the hit even if last_aim_unit changes before
--- a projectile arrives (travel time weapons like plasma).
-local _surgical_debug_fired_unit      = nil
-local _surgical_debug_fired_time      = nil
-local SURGICAL_DEBUG_MISS_TIMEOUT     = 2.0  -- seconds; clears unit if no hit arrives (miss/wall)
-
 local BREED_PRIORITY_MAP = {
     -- Hound
     chaos_hound = "target_hounds", --Pox Hound
@@ -855,9 +844,6 @@ local function predict_crit_wait(player_unit)
             -- auto-crit perk (ogryn_leadbelcher_auto_crit), it guarantees a crit —
             -- no need to hold for Surgical stacks.
             if last_is_lucky and talent_ext:has_special_rule(sr.ogryn_leadbelcher_auto_crit) then
-                if SURGICAL_DEBUG then
-                    mod:info("[surgical_prd] lucky_bullet_auto_crit → early fire")
-                end
                 return "fire"
             end
         end
@@ -919,34 +905,10 @@ local function predict_crit_wait(player_unit)
                 local health_ext = ScriptUnit_has_extension(last_aim_unit, "health_system")
                 if health_ext and health_ext:is_alive() then
                     local hp = health_ext:current_health()
-                    local n_dmg, c_dmg = _estimate_shot_damage(player_unit, last_aim_unit, true)
+                    local n_dmg = _estimate_shot_damage(player_unit, last_aim_unit, true)
                     if n_dmg and n_dmg > 0 then
                         local breed = Breed.unit_breed_or_nil(last_aim_unit)
                         local armor_type = breed and breed.armor_type
-                        if SURGICAL_DEBUG then
-                            if last_aim_unit ~= _surgical_debug_last_unit or current_stacks ~= _surgical_debug_last_stacks then
-                                _surgical_debug_last_unit   = last_aim_unit
-                                _surgical_debug_last_stacks = current_stacks
-                                local buff_ext2  = ScriptUnit_extension(player_unit, "buff_system")
-                                local sb         = buff_ext2 and buff_ext2:stat_buffs() or {}
-                                local armor_key2 = _ARMOR_STAT_BUFF_KEY[armor_type]
-                                local ppos = Unit_world_position(player_unit, 1)
-                                local tpos = Unit_world_position(last_aim_unit, 1)
-                                local dist2 = Vector3_length(tpos - ppos)
-                                mod:info("[surgical_dbg] target=%s armor=%s  base=%.3f  crit=%.3f  hp=%.1f  stacks=%d/%d  cur_chance=%.3f  extra_needed=%d  dist=%.1f",
-                                    breed and breed.name or "nil", tostring(armor_type),
-                                    n_dmg, c_dmg or 0, hp, current_stacks, max_steps, current_chance, extra, dist2)
-                                local parts = {}
-                                for k, v in pairs(sb) do
-                                    local vn = tonumber(v)
-                                    if vn and vn ~= 1 and vn ~= 0 then
-                                        parts[#parts + 1] = k .. "=" .. string.format("%.4f", vn)
-                                    end
-                                end
-                                table.sort(parts)
-                                mod:info("[surgical_dbg] buffs(%d): %s", #parts, table.concat(parts, "  "))
-                            end
-                        end
                         -- For carapace (super_armor, base ADM=0→crit floors at 0.25) and flak
                         -- (armored, base ADM=0.5, crit adds finesse ~1.5x), crits are valuable
                         -- enough that we only skip the wait if a single normal shot already kills.
@@ -2148,10 +2110,6 @@ local _get = function(func, self, action_name)
 
     local weapon_template, fire_mode = get_current_weapon_info()
     if action_name == "action_one_hold" and (fire_mode == "charge" or fire_mode == "full_auto") then
-        if SURGICAL_DEBUG then
-            _surgical_debug_fired_unit = last_aim_unit
-            _surgical_debug_fired_time = Managers.time and Managers.time:time("main")
-        end
         return true
     end
 
@@ -2160,10 +2118,6 @@ local _get = function(func, self, action_name)
         local fire_interval, current_time = get_fire_interval()
         if current_time - last_semi_auto_fire_time >= fire_interval then
             last_semi_auto_fire_time = current_time
-            if SURGICAL_DEBUG then
-                _surgical_debug_fired_unit = last_aim_unit
-                _surgical_debug_fired_time = Managers.time and Managers.time:time("main")
-            end
             return true
         end
         return false
@@ -2453,41 +2407,6 @@ mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, u
         has_target = false
     end
 end)
-
--- DamageCalculation is a plain require'd table, not a registered class, so
--- mod:hook won't find it by string name. Monkey-patch directly instead.
--- Uses _surgical_debug_fired_unit (snapshotted at fire time) so projectile-
--- travel weapons (plasma, bolter, etc.) still match after last_aim_unit moves on.
-do
-    -- Persist the true original across mod reloads: the first load stores it on
-    -- the table; subsequent reloads find it there instead of capturing the wrapper.
-    DamageCalculation._gambits_orig_calculate = DamageCalculation._gambits_orig_calculate or DamageCalculation.calculate
-    DamageCalculation.calculate = function(...)
-        local r1, r2, r3, r4, r5, r6, r7, r8, r9, r10 = DamageCalculation._gambits_orig_calculate(...)
-        if SURGICAL_DEBUG and _surgical_debug_fired_unit then
-            -- Auto-clear on miss: if the shot never hit within the timeout window, discard.
-            local now = Managers.time and Managers.time:time("main")
-            if now and _surgical_debug_fired_time and (now - _surgical_debug_fired_time) > SURGICAL_DEBUG_MISS_TIMEOUT then
-                _surgical_debug_fired_unit = nil
-                _surgical_debug_fired_time = nil
-            end
-            local target_unit        = select(30, ...)
-            local is_critical_strike = select(11, ...)
-            if target_unit == _surgical_debug_fired_unit then
-                -- r3=base_damage (raw), r4=base_buff_damage (stat buff portion),
-                -- so damage_stat_buffs = (r3+r4)/r3
-                local charge_level_srv = select(7, ...)
-                mod:info("[surgical_srv] crit=%s  charge=%.4f  total=%.3f  base=%.3f  base_buff=%.3f  finesse=%.3f  adm=%.3f  zone_mult=%.3f  dmg_mult=%.4f",
-                    tostring(is_critical_strike), charge_level_srv or 0,
-                    r1 or 0, r3 or 0, r4 or 0, r6 or 0, r9 or 0, r10 or 0,
-                    (r3 and r3 > 0) and ((r3 + (r4 or 0)) / r3) or 0)
-                _surgical_debug_fired_unit = nil
-                _surgical_debug_fired_time = nil
-            end
-        end
-        return r1, r2, r3, r4, r5, r6, r7, r8, r9, r10
-    end
-end
 
 mod:hook(CLASS.AccountManagerWinGDK, "_show_store_account_error", function(func, self, header_key, body_key, callback)
     if body_key == "loc_ms_store_mismatched_accounts" then
