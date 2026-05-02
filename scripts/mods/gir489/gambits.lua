@@ -158,6 +158,16 @@ local function get_player_archetype()
     return profile and profile.archetype and profile.archetype.name
 end
 
+local cached_settings  -- forward declaration; initialized below at refresh_settings()
+
+local function get_active_class()
+    local profile = cached_settings.priority_profile or "auto"
+    if profile == "auto" then
+        return get_player_archetype() or "custom"
+    end
+    return profile
+end
+
 local math_rad = math.rad
 local math_cos = math.cos
 local math_atan2 = math.atan2
@@ -191,8 +201,8 @@ local function priority_comparator(a, b)
     return a.distance_sq < b.distance_sq
 end
 
--- Cached settings, refreshed on change
-local cached_settings = {}
+-- Cached settings, refreshed on change (forward-declared above get_active_class)
+cached_settings = {}
 local function refresh_settings()
     cached_settings.enable_triggerbot = mod:get("enable_triggerbot")
     cached_settings.triggerbot_keybind = mod:get("triggerbot_keybind")
@@ -269,27 +279,13 @@ local function is_poxburster_safe_to_target(unit)
 end
 
 local function get_active_profile_behaviors()
-    local profile = cached_settings.priority_profile or "auto"
-    local class
-    if profile == "auto" then
-        class = get_player_archetype() or "custom"
-    else
-        class = profile
-    end
+    local class = get_active_class()
     local pb = cached_settings.profile_behaviors
     return (pb and pb[class]) or (pb and pb["custom"]) or {}
 end
 
 local function get_breed_priority(breed_name, unit)
-    local profile = cached_settings.priority_profile or "auto"
-    local tbl
-    if profile == "auto" then
-        local archetype = get_player_archetype()
-        tbl = cached_settings.priority_target[archetype or "custom"]
-    else
-        tbl = cached_settings.priority_target[profile]
-    end
-
+    local tbl = cached_settings.priority_target[get_active_class()]
     local priority = (tbl and tbl[breed_name]) or 0
     if priority > 0 and DAEMONHOST_BREEDS[breed_name] then
         return get_daemonhost_priority(unit, priority)
@@ -297,18 +293,21 @@ local function get_breed_priority(breed_name, unit)
     return priority
 end
 
-local function get_all_enemies()
+local function get_minion_entities()
     local extension_manager = Managers.state and Managers.state.extension
-    if not extension_manager then
-        return reusable_enemies, 0
-    end
-
+    if not extension_manager then return nil end
     local entities = extension_manager:get_entities("MinionHuskLocomotionExtension")
     if not next(entities) then
         entities = extension_manager:get_entities("MinionLocomotionExtension")
-        if not next(entities) then
-            return reusable_enemies, 0
-        end
+        if not next(entities) then return nil end
+    end
+    return entities
+end
+
+local function get_all_enemies()
+    local entities = get_minion_entities()
+    if not entities then
+        return reusable_enemies, 0
     end
 
     local player = Managers.player:local_player(1)
@@ -772,6 +771,20 @@ end
 -- Reads the critical_strike component's seed and prd_state, then simulates
 -- the PRD flip_coin at increasing chance values (one per hypothetical
 -- additional Surgical stack).
+-- Returns true if the Efficiency perk (first_shot_ammo_cost_reduction) is ready
+-- to fire (off cooldown), or if the player doesn't have the perk at all.
+-- The game uses off_cooldown_keywords to add "reduced_ammo_consumption" to the
+-- buff extension whenever the perk is not cooling down, so a keyword check is
+-- all that's needed once we've confirmed the perk is equipped.
+local EFFICIENCY_BUFF_NAME = "weapon_trait_bespoke_lasgun_p1_first_shot_ammo_cost_reduction"
+local EFFICIENCY_KEYWORD   = "reduced_ammo_consumption"
+local function is_efficiency_ready(player_unit)
+    local buff_ext = ScriptUnit_extension(player_unit, "buff_system")
+    if not buff_ext then return true end
+    if not buff_ext:has_buff_using_buff_template(EFFICIENCY_BUFF_NAME) then return true end
+    return buff_ext:has_keyword(EFFICIENCY_KEYWORD)
+end
+
 --
 -- Returns:
 --   "fire"          -- current chance already crits, or no Surgical / not
@@ -1255,35 +1268,22 @@ local function get_current_weapon_info()
     return weapon_template, get_weapon_fire_mode(weapon_template, is_ads), is_ads
 end
 
-local function is_main_weapon_equipped()
+-- slot_secondary is the main weapon (ranged), slot_primary is the melee weapon
+local function get_wielded_slot()
     local player = Managers.player:local_player_safe(1)
-    if not player or not player.player_unit then
-        return false
-    end
-
+    if not player or not player.player_unit then return nil end
     local unit_data_ext = ScriptUnit_extension(player.player_unit, "unit_data_system")
-    if not unit_data_ext then
-        return false
-    end
-
+    if not unit_data_ext then return nil end
     local inventory_component = unit_data_ext:read_component("inventory")
-    if not inventory_component then
-        return false
-    end
+    return inventory_component and inventory_component.wielded_slot
+end
 
-    -- slot_secondary is the main weapon (ranged), slot_primary is the melee weapon
-    local wielded_slot = inventory_component.wielded_slot
-    return wielded_slot == "slot_secondary"
+local function is_main_weapon_equipped()
+    return get_wielded_slot() == "slot_secondary"
 end
 
 local function is_melee_weapon_equipped()
-    local player = Managers.player:local_player_safe(1)
-    if not player or not player.player_unit then return false end
-    local unit_data_ext = ScriptUnit_extension(player.player_unit, "unit_data_system")
-    if not unit_data_ext then return false end
-    local inventory_component = unit_data_ext:read_component("inventory")
-    if not inventory_component then return false end
-    return inventory_component.wielded_slot == "slot_primary"
+    return get_wielded_slot() == "slot_primary"
 end
 
 local function is_reticle_on_enemy()
@@ -1434,6 +1434,9 @@ end
 
 -- Auto guard state: true when a nearby enemy is executing a power attack
 local auto_guard_blocking = false
+-- Tracks whether the previous frame's weapon action was a windup so the
+-- immediately-following sweep (heavy swing) is also guard-suppressed.
+local _prev_action_was_windup = false
 -- True when an enemy is within the player's weapon reach
 local melee_enemy_in_range = false
 -- Melee auto-attack pulse: simulate press→release so the game sees a rising edge each cycle
@@ -1449,6 +1452,7 @@ local MELEE_PRESS_DURATION = 0.05  -- seconds to hold the press true
 
 local DEFAULT_MELEE_REACH = 2.5  -- matches bot DEFAULT_MAXIMAL_MELEE_RANGE
 local DEFAULT_ENEMY_RADIUS = 0.5 -- matches bot DEFAULT_ENEMY_HITBOX_RADIUS_APPROXIMATION
+local VOID_SHIELD_REACH_BONUS = 1.5
 -- Enemies must be within this dot-product of the camera forward to count as
 -- "in range" for auto-attack.  0.0 = front hemisphere (180° total cone).
 local MELEE_FOV_DOT = 0.0
@@ -1689,6 +1693,14 @@ local function _get_windup_power_stacks(player_unit)
     return has_parent and stack_count or nil
 end
 
+local function is_priority_breed(breed)
+    return breed and (
+        VOID_SHIELD_BREEDS[breed.name] or
+        breed.is_boss == true or
+        (breed.tags ~= nil and (breed.tags.elite == true or breed.tags.special == true))
+    )
+end
+
 local function check_enemy_in_melee_range(player_unit)
     melee_target_unit = nil
     local player_pos = POSITION_LOOKUP[player_unit]
@@ -1697,7 +1709,6 @@ local function check_enemy_in_melee_range(player_unit)
     local reach = get_melee_reach(player_unit)
     -- Captains with an active void shield are fought at slightly longer range
     -- since the player needs to close distance to start stripping the shield.
-    local VOID_SHIELD_REACH_BONUS = 1.5
     local void_shield_reach = reach + VOID_SHIELD_REACH_BONUS
 
     -- Get camera forward once for the FOV check below.
@@ -1705,14 +1716,8 @@ local function check_enemy_in_melee_range(player_unit)
     local forward = unit_data_ext and
         Quaternion_forward(unit_data_ext:read_component("first_person").rotation)
 
-    local extension_manager = Managers.state and Managers.state.extension
-    if not extension_manager then return false, false end
-
-    local entities = extension_manager:get_entities("MinionHuskLocomotionExtension")
-    if not next(entities) then
-        entities = extension_manager:get_entities("MinionLocomotionExtension")
-        if not next(entities) then return false, false end
-    end
+    local entities = get_minion_entities()
+    if not entities then return false, false end
 
     -- Track the closest valid enemy and count regular (non-priority) enemies in range.
     -- Priority = boss / elite / special / void-shield captain.
@@ -1742,12 +1747,7 @@ local function check_enemy_in_melee_range(player_unit)
             -- Reject enemies outside the front hemisphere so we don't swing at
             -- things directly behind the player.
             if forward and Vector3_dot(forward, Vector3_normalize(diff)) >= MELEE_FOV_DOT then
-                local is_priority = breed and (
-                    VOID_SHIELD_BREEDS[breed.name] or
-                    breed.is_boss == true or
-                    (breed.tags ~= nil and (breed.tags.elite == true or breed.tags.special == true))
-                )
-                if not is_priority then
+                if not is_priority_breed(breed) then
                     regular_in_range = regular_in_range + 1
                 end
                 if dist_sq < best_dist_sq then
@@ -1772,8 +1772,7 @@ local function check_enemy_in_melee_range(player_unit)
                 local shield_up = is_void_shield_active(best_unit)
                 needs_heavy  = not shield_up
                 needs_thrust = not shield_up
-            elseif best_breed.is_boss == true or
-                   (best_breed.tags ~= nil and (best_breed.tags.elite == true or best_breed.tags.special == true)) then
+            elseif is_priority_breed(best_breed) then
                 -- Priority target: full heavy + activation + thrust stacks.
                 needs_heavy  = true
                 needs_thrust = true
@@ -1790,12 +1789,7 @@ local function check_enemy_in_melee_range(player_unit)
         -- Damage-based refinement: only for priority targets (boss/elite/special).
         -- Regular enemies always get light (or horde cleave), never upgraded by math.
         local dbg_hp, dbg_light, dbg_heavy
-        local is_priority_target = best_breed and (
-            VOID_SHIELD_BREEDS[best_breed.name] or
-            best_breed.is_boss == true or
-            (best_breed.tags ~= nil and (best_breed.tags.elite == true or best_breed.tags.special == true))
-        )
-        if is_priority_target and not (best_breed and VOID_SHIELD_BREEDS[best_breed.name]) then
+        if is_priority_breed(best_breed) and not VOID_SHIELD_BREEDS[best_breed.name] then
             local hp_ext = ScriptUnit_has_extension(best_unit, "health_system")
             local hp = hp_ext and hp_ext:current_health()
             dbg_hp = hp
@@ -1907,14 +1901,8 @@ local function check_power_attack_incoming(player_unit)
     local heavy_only = cached_settings.auto_guard_heavy_only
     local now = Managers.time:time("main") or 0
 
-    local extension_manager = Managers.state and Managers.state.extension
-    if not extension_manager then return false end
-
-    local entities = extension_manager:get_entities("MinionHuskLocomotionExtension")
-    if not next(entities) then
-        entities = extension_manager:get_entities("MinionLocomotionExtension")
-        if not next(entities) then return false end
-    end
+    local entities = get_minion_entities()
+    if not entities then return false end
 
     for unit, _ in pairs(entities) do
         local health_ext = ScriptUnit_has_extension(unit, "health_system")
@@ -1990,12 +1978,14 @@ local _get = function(func, self, action_name)
         return func(self, action_name)
     end
 
+    local melee_equipped = is_melee_weapon_equipped()
+
     -- Standalone auto-guard (always-on, independent of keybind).
     -- Injects action_two_hold (the raw InputService input that the action_input_parser
     -- maps to the "block" action input via the weapon template's action_inputs table).
     -- Only applies when a melee weapon is equipped; ranged weapons use action_two_hold
     -- for ADS and must not have it forced true.
-    if cached_settings.enable_auto_guard and auto_guard_blocking and is_melee_weapon_equipped() then
+    if cached_settings.enable_auto_guard and auto_guard_blocking and melee_equipped then
         if action_name == "action_two_hold" then
             return true
         end
@@ -2009,7 +1999,7 @@ local _get = function(func, self, action_name)
     local keybind_active = not next(keybind) or triggerbot_pressed
 
     -- Melee auto-fight: keybind held + melee weapon equipped
-    if keybind_active and is_melee_weapon_equipped() then
+    if keybind_active and melee_equipped then
         if auto_guard_blocking then
             -- Power attack incoming: inject action_two_hold (the raw input the
             -- action_input_parser maps to the "block" weapon action).
@@ -2091,7 +2081,7 @@ local _get = function(func, self, action_name)
     end
 
     local active_behaviors = get_active_profile_behaviors()
-    local can_fire = active_behaviors.triggerbot_use_raycast and is_reticle_on_enemy() or not active_behaviors.triggerbot_use_raycast and has_target
+    local can_fire = (active_behaviors.triggerbot_use_raycast and is_reticle_on_enemy()) or (not active_behaviors.triggerbot_use_raycast and has_target)
     if not can_fire then
         return func(self, action_name)
     end
@@ -2106,6 +2096,14 @@ local _get = function(func, self, action_name)
                 return false
             end
         end
+    end
+
+    -- Efficiency perk wait: suppress fire while the ammo-reduction cooldown is active.
+    -- is_efficiency_ready returns true immediately if the perk isn't equipped.
+    local player_unit_eff = Managers.player:local_player(1)
+    player_unit_eff = player_unit_eff and player_unit_eff.player_unit
+    if player_unit_eff and not is_efficiency_ready(player_unit_eff) then
+        return false
     end
 
     local weapon_template, fire_mode = get_current_weapon_info()
@@ -2257,18 +2255,31 @@ mod:hook_safe("PlayerUnitFirstPersonExtension", "fixed_update", function(self, u
     _last_melee_equipped = melee_equipped
 
     if cached_settings.enable_auto_guard or melee_mode_active then
-        -- Don't guard while charging a heavy attack: interrupting a windup with a block
-        -- cancels the swing and wastes the charge.  Check both the mod's own heavy-phase
-        -- state machine (melee_heavy_phase == 1) and the game's reported action kind so
-        -- that manually-charged heavies are also covered.
-        local suppress_for_charge = melee_heavy_phase == 1
+        -- Don't guard while charging or swinging a heavy attack: blocking cancels the swing.
+        -- Covers the mod's phase state machine (phases 1 and 2) and game-reported action kinds
+        -- (windup + the sweep that immediately follows) for manually-charged heavies.
+        -- Phase 1 = charging; phase 2 = released but swing still in flight.
+        local suppress_for_charge = melee_heavy_phase >= 1
         if not suppress_for_charge then
             local unit_data_ext = ScriptUnit_has_extension(unit, "unit_data_system")
             local wac = unit_data_ext and unit_data_ext:read_component("weapon_action")
             if wac then
                 local wt = WeaponTemplate.current_weapon_template(wac)
                 local _, action_settings = Action.current_action(wac, wt)
-                suppress_for_charge = action_settings ~= nil and action_settings.kind == "windup"
+                local cur_kind = action_settings and action_settings.kind
+                -- Suppress during the windup itself, AND during the sweep that
+                -- immediately follows a windup (the heavy swing frame).
+                if cur_kind == "windup" then
+                    suppress_for_charge    = true
+                    _prev_action_was_windup = true
+                elseif cur_kind == "sweep" and _prev_action_was_windup then
+                    suppress_for_charge    = true
+                    _prev_action_was_windup = false
+                else
+                    _prev_action_was_windup = false
+                end
+            else
+                _prev_action_was_windup = false
             end
         end
         -- Don't guard while in shroudfield: raising a block immediately breaks the
